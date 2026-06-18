@@ -677,17 +677,22 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         handle_label_extra_right = (len(handle_label_text) * (9/72) / _eff_mm_to_inch * 0.82) + 50 + total_right_thick
 
     body_center_x = (content_left + content_right) / 2  # = w/2, 텍스트도 이 중심으로 좌우대칭
-    text_extra_halfwidth = max(glass_hw, title_hw, size_hw, (content_right - content_left) / 2) - (content_right - content_left) / 2
 
-    BOX_PAD = 60
-    # ★ [좌우 비대칭 버그 수정] handle_label_extra_right는 본체 우측에 핸들 라벨을 위한 공간을 추가하는데,
-    # 이를 box_w에만 더하면 본체+텍스트(모두 w/2 중심)가 박스 안에서 좌측으로 쏠려 보인다.
-    # box_x도 그 절반만큼 왼쪽으로 같이 밀어주면, 본체가 박스의 새로운 중심에 맞춰져 좌우 대칭으로 보인다.
-    box_x = content_left - BOX_PAD - text_extra_halfwidth - handle_label_extra_right / 2
-    box_w = (content_right - content_left) + BOX_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
-    # ★ 박스 전체 = 헤더공간 + 본체(통바포함) + 호흡여백(상하) + 사이�: 모두 mm 단위로 합산
+    # ★★★ [좌우 여백 통일] 상/하 호흡 여백(헤더 오프셋 400, 푸터 오프셋 260)과 비슷한 수준으로 좌우에도
+    # 넉넉한 기본 여백(SIDE_PAD)을 준다. 기존엔 좌우가 BOX_PAD=60mm로 너무 좁아 답답했다.
+    # SIDE_PAD는 상단 호흡여백(_h_mm(11)*2 ≈ 글자 2줄 높이)에 맞춰 폰트 스케일 기반으로 잡아 배율과 무관하게 일관됨.
+    SIDE_PAD = _h_mm(11) * 2  # 약 글자 2줄 높이에 해당하는 좌우 여백 (상/하 여백과 시각적으로 균형)
+
+    # 텍스트가 본체 절반보다 넓을 때의 초과분. 단, 그 초과분이 SIDE_PAD 안에 들어오면 추가 확장 불필요.
+    body_halfwidth = (content_right - content_left) / 2
+    text_overflow = max(glass_hw, title_hw, size_hw, body_halfwidth) - body_halfwidth
+    text_extra_halfwidth = max(0, text_overflow - SIDE_PAD)  # SIDE_PAD를 넘는 만큼만 박스를 더 넓힘
+
+    box_x = content_left - SIDE_PAD - text_extra_halfwidth - handle_label_extra_right / 2
+    box_w = (content_right - content_left) + SIDE_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
+    # ★ 박스 전체 = 헤더공간 + 본체(통바포함) + 호흡여백(상하) + 사이즈: 모두 mm 단위로 합산
     box_top = body_top + header_h_mm
-    box_bot = body_bot - footer_h_mm - BOX_PAD
+    box_bot = body_bot - footer_h_mm
     box_h = box_top - box_bot
     box_y = box_bot
 
@@ -695,7 +700,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     ax.add_patch(patches.FancyBboxPatch(
         (box_x, box_y), box_w, box_h,
         boxstyle=f"round,pad=0,rounding_size={corner_r}",
-        facecolor='none', edgecolor='#D1D5DB', linewidth=0.5, zorder=-10, clip_on=False
+        facecolor='none', edgecolor='#E5E7EB', linewidth=0.4, zorder=-10, clip_on=False
     ))
     for _txt in ax.texts:
         _txt.set_clip_on(False)
@@ -756,7 +761,6 @@ def _compute_window_footprint(win, mm_to_inch=None):
     title_hw = _text_halfwidth_mm(title_line2, 11)
     size_hw = _text_halfwidth_mm(size_label, 11)
     body_halfwidth = (w_val + total_left + total_right) / 2
-    text_extra_halfwidth = max(glass_hw, title_hw, size_hw, body_halfwidth) - body_halfwidth
 
     # ★ [요청4] 핸들 라벨("핸들: 450")이 본체 우측 밖으로 펼쳐지는 만큼 footprint에도 동일하게 반영
     handle_h = win.get('핸들높이')
@@ -765,9 +769,13 @@ def _compute_window_footprint(win, mm_to_inch=None):
         handle_label_text = f"핸들: {handle_h}"
         handle_label_extra_right = (len(handle_label_text) * (9/72) / _eff_mm_to_inch * 0.82) + 50 + total_right
 
-    BOX_PAD = 60
-    footprint_w = (w_val + total_left + total_right) + BOX_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
-    footprint_h = (h_val + total_top + total_bot) + header_h_mm + footer_h_mm + BOX_PAD
+    # ★★★ [좌우 여백 통일] render_window_on_ax와 정확히 동일한 SIDE_PAD 로직
+    SIDE_PAD = _h_mm(11) * 2
+    text_overflow = max(glass_hw, title_hw, size_hw, body_halfwidth) - body_halfwidth
+    text_extra_halfwidth = max(0, text_overflow - SIDE_PAD)
+
+    footprint_w = (w_val + total_left + total_right) + SIDE_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
+    footprint_h = (h_val + total_top + total_bot) + header_h_mm + footer_h_mm
     return footprint_w, footprint_h
 
 
