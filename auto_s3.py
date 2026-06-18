@@ -668,12 +668,20 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     glass_hw = _text_halfwidth_mm(glass_text_for_width, 9)
     title_hw = _text_halfwidth_mm(title_line2_for_width, 11)
     size_hw = _text_halfwidth_mm(size_label_for_width, 11)
+
+    # ★ [요청4] 핸들 라벨("핸들: 450")이 박스 우측 밖으로 나가지 않도록, 그 폭을 박스 가로 계산에 포함.
+    # 핸들 라벨은 본체 우측 끝(w + 우측통바두께)에서 시작해 오른쪽으로 펼쳐지므로, 우측에만 추가폭이 필요.
+    handle_label_extra_right = 0
+    if handle_h and not ("핸들" in door_info and "힌지" in door_info):
+        handle_label_text = f"핸들: {handle_h}"
+        handle_label_extra_right = (len(handle_label_text) * (9/72) / _eff_mm_to_inch * 0.82) + 50 + total_right_thick
+
     body_center_x = (content_left + content_right) / 2  # = w/2, 텍스트도 이 중심으로 좌우대칭
     text_extra_halfwidth = max(glass_hw, title_hw, size_hw, (content_right - content_left) / 2) - (content_right - content_left) / 2
 
     BOX_PAD = 60
     box_x = content_left - BOX_PAD - text_extra_halfwidth
-    box_w = (content_right - content_left) + BOX_PAD * 2 + text_extra_halfwidth * 2
+    box_w = (content_right - content_left) + BOX_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
     # ★ 박스 전체 = 헤더공간 + 본체(통바포함) + 호흡여백(상하) + 사이�: 모두 mm 단위로 합산
     box_top = body_top + header_h_mm
     box_bot = body_bot - footer_h_mm - BOX_PAD
@@ -747,22 +755,98 @@ def _compute_window_footprint(win, mm_to_inch=None):
     body_halfwidth = (w_val + total_left + total_right) / 2
     text_extra_halfwidth = max(glass_hw, title_hw, size_hw, body_halfwidth) - body_halfwidth
 
+    # ★ [요청4] 핸들 라벨("핸들: 450")이 본체 우측 밖으로 펼쳐지는 만큼 footprint에도 동일하게 반영
+    handle_h = win.get('핸들높이')
+    handle_label_extra_right = 0
+    if handle_h:
+        handle_label_text = f"핸들: {handle_h}"
+        handle_label_extra_right = (len(handle_label_text) * (9/72) / _eff_mm_to_inch * 0.82) + 50 + total_right
+
     BOX_PAD = 60
-    footprint_w = (w_val + total_left + total_right) + BOX_PAD * 2 + text_extra_halfwidth * 2
+    footprint_w = (w_val + total_left + total_right) + BOX_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
     footprint_h = (h_val + total_top + total_bot) + header_h_mm + footer_h_mm + BOX_PAD
     return footprint_w, footprint_h
 
 
+def _flow_layout_pages(draw_data, mm_to_inch, page_w_mm, page_h_mm, gap_mm):
+    """★★★ [완전 재설계] 단일 배율(mm_to_inch) 기반 진짜 flow layout.
+    - 도면을 순서대로 좌측 상단부터 가로로 채워나간다.
+    - 다음 도면을 넣었을 때 그 행의 가용 폭(page_w_mm, 종이 위 물리적 mm)을 넘으면 새 행으로 줄바꿈.
+    - 새 행을 추가했을 때 페이지 가용 높이(page_h_mm)를 넘으면 새 페이지로 넘어간다.
+    - 배율을 바꾸면(mm_to_inch 변경) 이 모든 행/페이지 구성이 자동으로 다시 계산된다 (요청2: 줌인/줌아웃 = 재배치).
+    ★ 핵심: _compute_window_footprint가 반환하는 값은 '실제 세계 mm'다. 이를 mm_to_inch로 종이 위 inch로
+    환산한 뒤 다시 INCH_PER_MM으로 나눠 '종이 위 물리적 mm'로 바꿔야 page_w_mm/page_h_mm과 비교 가능하다.
+    반환: pages = [page1, page2, ...], 각 page = [row1, row2, ...], 각 row = [(win, drawn_w_mm, drawn_h_mm), ...]
+    드로잉 단계(generate_a3_pdf_and_images)에서는 이 '종이 위 물리적 mm'를 다시 inch로 환산해서 axes 크기를 정한다.
+    """
+    INCH_PER_MM = 1 / 25.4
+    raw_footprints = [_compute_window_footprint(w, mm_to_inch) for w in draw_data]  # 실제 세계 mm
+    # ★ 실제 세계 mm → 종이 위 물리적 mm로 정확히 환산 (페이지 크기와 비교하기 위한 용도로만 사용)
+    paper_footprints = [(fw * mm_to_inch / INCH_PER_MM, fh * mm_to_inch / INCH_PER_MM) for fw, fh in raw_footprints]
+
+    pages = []
+    cur_page_rows = []
+    cur_page_h_used = 0.0  # 종이 위 mm 기준 누적
+
+    cur_row = []
+    cur_row_w_used = 0.0   # 종이 위 mm 기준
+    cur_row_max_h_paper = 0.0
+    cur_row_max_h_real = 0.0
+
+    def _flush_row():
+        nonlocal cur_row, cur_row_w_used, cur_row_max_h_paper, cur_row_max_h_real, cur_page_rows, cur_page_h_used
+        if not cur_row:
+            return
+        cur_page_rows.append((cur_row, cur_row_max_h_real))  # ★ 실제 세계 mm로 행 높이 저장 (render 함수가 그 단위를 기대함)
+        cur_page_h_used += cur_row_max_h_paper + gap_mm
+        cur_row = []
+        cur_row_w_used = 0.0
+        cur_row_max_h_paper = 0.0
+        cur_row_max_h_real = 0.0
+
+    def _flush_page():
+        nonlocal cur_page_rows, cur_page_h_used, pages
+        _flush_row()
+        if cur_page_rows:
+            pages.append(cur_page_rows)
+        cur_page_rows = []
+        cur_page_h_used = 0.0
+
+    for win, (fw_real, fh_real), (fw_paper, fh_paper) in zip(draw_data, raw_footprints, paper_footprints):
+        needed_w_paper = fw_paper if not cur_row else cur_row_w_used + gap_mm + fw_paper
+
+        # ★ [요청2] 현재 행에 가로로 더 들어갈 공간이 없으면 행을 마감하고 새 행 시작
+        if cur_row and needed_w_paper > page_w_mm:
+            _flush_row()
+            needed_w_paper = fw_paper
+
+        # 새 행을 추가했을 때(또는 첫 도면일 때) 그 행의 높이가 페이지 가용 높이를 넘으면 새 페이지로
+        prospective_row_h_paper = max(cur_row_max_h_paper, fh_paper) if cur_row else fh_paper
+        prospective_page_h = cur_page_h_used + prospective_row_h_paper
+        if prospective_page_h > page_h_mm and (cur_page_rows or cur_row):
+            if not cur_row:
+                _flush_page()
+            else:
+                _flush_row()
+                if cur_page_h_used + fh_paper > page_h_mm and cur_page_rows:
+                    _flush_page()
+
+        cur_row.append((win, fw_real, fh_real))  # ★ render 단계에는 실제 세계 mm 그대로 전달
+        cur_row_w_used = needed_w_paper
+        cur_row_max_h_paper = max(cur_row_max_h_paper, fh_paper)
+        cur_row_max_h_real = max(cur_row_max_h_real, fh_real)
+
+    _flush_page()
+    return pages
+
+
 def _layout_page_grid(chunk, n_cols, page_w_mm_budget, mm_to_inch=None):
-    """공통 mm 스케일 기반 flow layout.
-    - 페이지 폭(mm 환산 예산)을 n_cols로 나눈 '기준 칸 폭'을 먼저 정하고,
-    - 각 행은 그 행에 들어가는 도면들의 실제 footprint_h(mm) 중 최댓값으로 행 높이를 정한다 (요청4: 행마다 최대 도면 기준).
-    - 도면 크기를 셀에 맞춰 늘리지 않고, 실제 mm 크기 그대로 좌측상단에 배치 (요청2: 스케일 왜곡 금지).
-    - 한 행에 n_cols보다 적게 들어가면 남는 칸은 빈 칸으로 둔다."""
+    """[하위 호환용] 공통 mm 스케일 기반 flow layout (고정 n_cols 그리드 — 구버전 호환).
+    새 흐름(_flow_layout_pages)을 쓰지 않는 다른 호출부가 있을 경우를 위해 유지."""
     rows = [chunk[i:i + n_cols] for i in range(0, len(chunk), n_cols)]
-    row_items = []   # 각 행: [(win 또는 None, footprint_w, footprint_h), ...] 항상 n_cols개
-    row_heights_mm = []  # 각 행의 실제 mm 높이 (그 행 최대 도면 기준)
-    empty_col_w_mm = page_w_mm_budget / n_cols  # 빈 칸 폭(mm) — 균등 칸 폭 기준과 동일하게 맞춤
+    row_items = []
+    row_heights_mm = []
+    empty_col_w_mm = page_w_mm_budget / n_cols
 
     for row in rows:
         footprints = [_compute_window_footprint(w, mm_to_inch) for w in row]
@@ -776,83 +860,87 @@ def _layout_page_grid(chunk, n_cols, page_w_mm_budget, mm_to_inch=None):
     return row_items, row_heights_mm
 
 
-def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_page=12):
+def _pick_scale_ratio(draw_data, page_w_mm, page_h_mm, gap_mm, target_cols=4, target_rows=3):
+    """★★★ [요청1] 표준 건축 스케일(1:30~1:300) 중에서,
+    '평균적인 크기의 도면 기준으로 한 페이지에 target_cols x target_rows개 정도가 들어갈 만한'
+    가장 작은 배율 숫자(=가장 크게 보이는 스케일)를 자동으로 고른다.
+    ★ 핵심: footprint(실제 세계 mm)에 mm_to_inch를 곱하면 '종이 위에서 차지하는 inch'가 되고,
+    이를 다시 INCH_PER_MM으로 나누면 '종이 위에서 차지하는 물리적 mm'가 된다.
+    이 '종이 위 물리적 mm'을 페이지/칸의 실제 mm 크기(target_col_w_mm 등)와 비교해야 한다."""
+    STANDARD_SCALES = [30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300]
+    if not draw_data:
+        return 50
+
+    INCH_PER_MM = 1 / 25.4
+    target_col_w_mm = page_w_mm / target_cols - gap_mm
+    target_row_h_mm = page_h_mm / target_rows - gap_mm
+
+    best_scale = STANDARD_SCALES[-1]
+    for scale in STANDARD_SCALES:  # 작은 배율 숫자(=크게 보임)부터 검사해서, 대표 도면이 칸에 들어가는 첫 배율을 선택
+        mm_to_inch = INCH_PER_MM / scale
+        fps = sorted([_compute_window_footprint(w, mm_to_inch) for w in draw_data], key=lambda x: x[0] * x[1])
+        rep_fw, rep_fh = fps[len(fps) // 2]
+        # ★ 실제 세계 mm(footprint) → 종이 위 물리적 mm로 정확히 환산
+        drawn_w_mm = rep_fw * mm_to_inch / INCH_PER_MM
+        drawn_h_mm = rep_fh * mm_to_inch / INCH_PER_MM
+        if drawn_w_mm <= target_col_w_mm and drawn_h_mm <= target_row_h_mm:
+            best_scale = scale
+            break
+    return best_scale
+
+
+def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_page=12, scale_ratio=None):
     pdf_buf = io.BytesIO()
     img_bufs = []          # 페이지별 PNG (개별 다운로드용)
-
-    chunks = [draw_data[i:i + items_per_page] for i in range(0, len(draw_data), items_per_page)]
-    all_figs = []  # ★ [요청1] 전체 페이지를 하나로 합친 이미지를 만들기 위해 각 페이지 fig를 보관
+    all_figs = []
 
     # ★★★ [핵심] 캔버스는 항상 A3 가로(420mm × 297mm) 비율로 고정 — 도면 개수/크기와 무관하게 절대 불변
     A3_W_MM, A3_H_MM = 420.0, 297.0
-    PAGE_W_INCH = 16.53          # A3 가로(420mm)를 인치로 환산한 고정값
-    PAGE_H_INCH = PAGE_W_INCH * (A3_H_MM / A3_W_MM)  # = 11.69, A3 비율 그대로 고정
+    PAGE_W_INCH = 16.53
+    PAGE_H_INCH = PAGE_W_INCH * (A3_H_MM / A3_W_MM)
     HEADER_INCH = 0.5
     FOOTER_INCH = 0.45
-    MARGIN_INCH = 0.28    # ★ [요청2] 페이지 테두리 ~ 첫 도면 시작점까지의 기준 여백 (모든 방향 동일) — 레이아웃선과 박스 사이 여유 확보
-    GAP_INCH = 0.20       # ★ [요청3] 도면 사이 간격 — 이후 모든 칸 배치의 '기준 간격'
+    MARGIN_INCH = 0.28
+    GAP_INCH = 0.20
+    INCH_PER_MM = 1 / 25.4
+    GAP_MM = GAP_INCH / INCH_PER_MM
 
     body_w_inch = PAGE_W_INCH - MARGIN_INCH * 2
     body_h_inch = PAGE_H_INCH - HEADER_INCH - FOOTER_INCH - MARGIN_INCH * 2
-    avail_w_inch = body_w_inch - GAP_INCH * (n_cols - 1)
-    target_col_w_inch = avail_w_inch / n_cols
+    page_w_mm = body_w_inch / INCH_PER_MM
+    page_h_mm = body_h_inch / INCH_PER_MM
 
-    # ★ [요청2 핵심] 스케일을 "페이지당 최대 행 수(n_rows_per_page)"로 나누면,
-    # 실제 행이 1~2개뿐인 페이지도 강제로 3행 몫의 작은 공간만 할당받아 전부 축소되는 버그가 있었음.
-    # 올바른 방법: 페이지마다 "실제 그 페이지에 필요한 행들의 mm 높이 합"이 body_h_inch 안에 들어가는
-    # 가장 큰 스케일을 찾는다. ★ footprint는 이제 헤더+본체+사이즈텍스트를 전부 포함하므로,
-    # 별도의 텍스트 공간을 추가로 빼지 않고 그대로 사용한다.
-    def _calc_mm_to_inch(text_pad_scale):
-        all_fps = [_compute_window_footprint(w, text_pad_scale) for w in draw_data] if draw_data else [(2500, 2500)]
-        max_w_mm = max(fw for fw, fh in all_fps)
-        scale_by_w = target_col_w_inch / max_w_mm if max_w_mm else 1
+    # ★★★ [요청1,5] 단일 배율(scale_ratio, 예: 50은 1:50) — 모든 도면이 이 배율 하나만 공유한다.
+    # scale_ratio가 주어지지 않으면(자동 모드) 표준 배율 중 적당한 값을 자동 선택.
+    if scale_ratio is None:
+        scale_ratio = _pick_scale_ratio(draw_data, page_w_mm, page_h_mm, GAP_MM)
+    MM_TO_INCH = INCH_PER_MM / scale_ratio  # 1mm가 차지하는 inch = (1/25.4)/배율
 
-        # 페이지 단위로 끊어서, 각 페이지의 "행별 높이 합"을 구하고, 그중 가장 큰 합을 기준으로 스케일 제한
-        scale_by_h = float('inf')
-        chunks_for_scale = [draw_data[i:i + items_per_page] for i in range(0, len(draw_data), items_per_page)] if draw_data else [[]]
-        for chunk_for_scale in chunks_for_scale:
-            rows_split = [chunk_for_scale[i:i+n_cols] for i in range(0, len(chunk_for_scale), n_cols)]
-            n_rows_here = max(1, len(rows_split))
-            total_row_h_mm = 0
-            for row in rows_split:
-                fps = [_compute_window_footprint(w, text_pad_scale) for w in row] if row else [(2500, 2500)]
-                total_row_h_mm += max(fh for _, fh in fps)
-            if total_row_h_mm <= 0:
-                continue
-            max_total_row_h_inch = body_h_inch - GAP_INCH * max(0, n_rows_here - 1)
-            scale_by_h = min(scale_by_h, max_total_row_h_inch / total_row_h_mm)
-
-        if scale_by_h == float('inf'):
-            scale_by_h = scale_by_w
-        return min(scale_by_w, scale_by_h)
-
-    ROUGH_MM_TO_INCH = _calc_mm_to_inch(None)
-    MM_TO_INCH = _calc_mm_to_inch(ROUGH_MM_TO_INCH)  # 2차: 실측 텍스트 크기 반영해 정확한 스케일 확정
+    # ★★★ [요청2] 단일 배율 + flow layout으로 모든 도면을 페이지에 자동 배치.
+    # 배율을 바꾸면 이 페이지 구성 자체가 통째로 다시 계산된다 (도면이 행/페이지를 자유롭게 넘나듦).
+    pages = _flow_layout_pages(draw_data, MM_TO_INCH, page_w_mm, page_h_mm, GAP_MM)
+    if not pages:
+        pages = [[]]
 
     with PdfPages(pdf_buf) as pdf:
-        for page_num, chunk in enumerate(chunks):
-            row_items, row_heights_mm = _layout_page_grid(chunk, n_cols, target_col_w_inch / MM_TO_INCH, MM_TO_INCH)
-            n_rows = len(row_items)
-
-            # ★★★ figure 크기는 항상 A3 고정 (콘텐츠 양에 따라 변하지 않음)
+        for page_num, page_rows in enumerate(pages):
             fig = plt.figure(figsize=(PAGE_W_INCH, PAGE_H_INCH))
 
-            # 헤더 바 (페이지 최상단, 모든 페이지 동일 위치)
             header_h_frac = HEADER_INCH / PAGE_H_INCH
             fig.patches.extend([patches.Rectangle((0.01, 0.01), 0.98, 0.98, fill=False, color='#1E293B', lw=2.5, transform=fig.transFigure, figure=fig)])
             fig.patches.extend([patches.Rectangle((0.01, 1 - 0.01 - header_h_frac), 0.98, header_h_frac, fill=True, color='#F8FAFC', ec='#1E293B', lw=2.5, transform=fig.transFigure, figure=fig)])
             author_name = st.session_state.get("user_name", "")
-            fig.text(0.5, 1 - 0.01 - header_h_frac / 2, f"파트너: {p_name}      |      현장: {s_addr}      |      작성자: {author_name}", ha='center', va='center', fontsize=16, fontweight='bold', color='#0F172A')
+            fig.text(0.5, 1 - 0.01 - header_h_frac / 2, f"파트너: {p_name}      |      현장: {s_addr}      |      작성자: {author_name}      |      스케일 1:{scale_ratio}", ha='center', va='center', fontsize=16, fontweight='bold', color='#0F172A')
 
-            # ★ [요청1,7] 본문 시작 기준점: 모든 페이지에서 헤더 바로 아래 동일한 y좌표에서 시작 (헤더와 도면 사이 간격 고정)
+            # ★ [요청3] 본문 시작 기준점: 모든 페이지에서 헤더 바로 아래 동일한 y좌표에서 시작
             body_top_y_inch = PAGE_H_INCH - HEADER_INCH - MARGIN_INCH
             cursor_y_inch = body_top_y_inch
 
-            for r_idx, row in enumerate(row_items):
-                row_h_inch = row_heights_mm[r_idx] * MM_TO_INCH  # ★ 이 행의 박스(헤더+본체+사이즈 전체) 높이
-                cursor_x_inch = MARGIN_INCH  # ★ [요청7] 모든 행이 동일한 좌측 시작선 공유
-                for c_idx, (win, fw_mm, fh_mm) in enumerate(row):
-                    col_w_inch = fw_mm * MM_TO_INCH  # ★ 이 칸의 박스(헤더+본체+사이즈 전체) 폭
+            for row, row_max_h_mm in page_rows:
+                row_h_inch = row_max_h_mm * MM_TO_INCH  # ★ [요청3] 행 높이 = 그 행에서 가장 큰 도면의 박스 높이
+                cursor_x_inch = MARGIN_INCH
+                for win, fw_mm, fh_mm in row:
+                    col_w_inch = fw_mm * MM_TO_INCH
 
                     ax_left = cursor_x_inch / PAGE_W_INCH
                     ax_bottom = (cursor_y_inch - row_h_inch) / PAGE_H_INCH
@@ -860,39 +948,30 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
                     ax_h = row_h_inch / PAGE_H_INCH
 
                     ax = fig.add_axes([ax_left, ax_bottom, ax_w, ax_h])
-                    if win is None:
-                        ax.axis('off')
-                        cursor_x_inch += col_w_inch + GAP_INCH
-                        continue
-
                     render_window_on_ax(
                         ax, win['순번'], win['unit_w'] * win.get('repeat_count', 1), win['세로(H)'], win['w1'], win['형태'], win['위치'],
                         win['제품명'], win['모델명'], win['glass_in'], win['glass_out'], win.get('핸들높이'), win['vent_dir'], win['has_screen'],
                         win['auto_top'], win['auto_bot'], win['auto_left'], win['auto_right'],
                         repeat_count=win.get('repeat_count', 1), unit_w=win.get('unit_w'),
-                        cell_h_mm=fh_mm, mm_to_inch=MM_TO_INCH
+                        cell_h_mm=row_max_h_mm, mm_to_inch=MM_TO_INCH
                     )
-                    # ★ [요청2,3 핵심] 다음 칸은 "이 박스의 실제 폭(col_w_inch) + 고정 간격(GAP_INCH)"만큼 이동.
-                    # 박스 자체에 이미 텍스트 폭이 필요한 만큼 포함되어 있으므로, 옆 칸과 자동으로 겹치지 않는다.
+                    # ★ [요청3] 다음 칸은 이 박스의 실제 폭 + 고정 간격만큼 이동
                     cursor_x_inch += col_w_inch + GAP_INCH
 
                 cursor_y_inch -= (row_h_inch + GAP_INCH)
 
             footer_h_frac = FOOTER_INCH / PAGE_H_INCH
-            footer_text = f"💡 {HOMECC_SLOGAN}   (Page {page_num+1}/{len(chunks)})"
+            footer_text = f"💡 {HOMECC_SLOGAN}   (Page {page_num+1}/{len(pages)})"
             fig.text(0.5, footer_h_frac / 2, footer_text, ha='center', fontsize=13, color='#1E3A8A', fontweight='bold')
 
             pdf.savefig(fig)
 
-            # ★★★ [핵심 수정] bbox_inches='tight' 제거 — A3 고정 캔버스를 그대로 저장해야 스케일이 보존됨
-            # (tight를 쓰면 빈 여백이 잘려나가면서 페이지마다 다른 크기로 저장되어, 도면이 적은 페이지가 부풀려져 스케일이 깨짐)
             img_buf = io.BytesIO()
             fig.savefig(img_buf, format='png', dpi=200)
             img_bufs.append(img_buf.getvalue())
 
-            all_figs.append(fig)  # 닫지 않고 보관 (전체 합본 이미지 생성에 재사용)
+            all_figs.append(fig)
 
-    # ★ [요청1] 전체 페이지를 하나로 합친 단일 이미지 생성 (PIL로 세로 스택)
     combined_buf = io.BytesIO()
     if img_bufs:
         page_images = [Image.open(io.BytesIO(b)) for b in img_bufs]
@@ -1107,6 +1186,32 @@ if uploaded_file:
         c1, c2 = st.columns([1, 1])
         with c1: partner_input = st.text_input("🏢 파트너명 (도면 헤더용)", value=ext_partner)
         with c2: address_input = st.text_input("📍 현장주소 (도면 헤더용)", value=ext_address)
+
+        # ★★★ [요청1,2] 단일 배율(scale ratio) 선택 UI — 건축도면처럼 1:50, 1:60 등 표준 배율 중 선택.
+        # 기본은 '자동'(파일에 맞는 배율을 알아서 계산)이고, 마음에 안 들면 수동으로 한 단계씩 키우거나 줄일 수 있다.
+        # 배율을 바꾸면 전체 페이지 구성(몇 행/몇 페이지)이 자동으로 다시 계산된다 (flow layout 재배치).
+        STANDARD_SCALES = [30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300]
+        if "scale_mode" not in st.session_state:
+            st.session_state["scale_mode"] = "auto"
+
+        sc1, sc2 = st.columns([1, 2])
+        with sc1:
+            auto_mode = st.toggle("🤖 배율 자동 추천", value=(st.session_state["scale_mode"] == "auto"), key="scale_auto_toggle")
+        with sc2:
+            if not auto_mode:
+                if "manual_scale" not in st.session_state:
+                    st.session_state["manual_scale"] = 50
+                chosen_scale = st.select_slider(
+                    "🔍 도면 배율 직접 선택 (숫자가 작을수록 도면이 크게 보임)",
+                    options=STANDARD_SCALES,
+                    value=st.session_state["manual_scale"],
+                    format_func=lambda x: f"1:{x}",
+                    key="manual_scale"
+                )
+                st.caption("배율을 바꾸면 도면이 행/페이지를 넘나들며 자동으로 재배치됩니다. 마우스로 슬라이더를 끌어 즉시 조정해보세요.")
+            else:
+                chosen_scale = None
+                st.caption("파일의 도면 크기에 맞춰 가장 적절한 표준 배율(1:30~1:300)을 자동으로 선택합니다.")
         
         if st.button("📄 도면 굽기 (출력용 PDF & 카톡용 이미지 추출)", type="primary", use_container_width=True):
             with st.spinner("도면 생성 중..."):
@@ -1119,7 +1224,7 @@ if uploaded_file:
                     win_copy['auto_right'] = st.session_state.get(f"saved_right_{uid}", win['auto_right'])
                     final_draw_data.append(win_copy)
                 
-                pdf_bytes, img_bytes_list, combined_img_bytes = generate_a3_pdf_and_images(final_draw_data, partner_input, address_input)
+                pdf_bytes, img_bytes_list, combined_img_bytes = generate_a3_pdf_and_images(final_draw_data, partner_input, address_input, scale_ratio=chosen_scale)
                 log_usage(partner_input, address_input, len(final_draw_data))
                 
                 st.success("🎉 도면 생성 완료! 사용 로그가 성공적으로 기록되었습니다.")
