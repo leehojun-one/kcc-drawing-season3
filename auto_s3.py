@@ -636,14 +636,23 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     total_left_thick = sum(t['thick'] * t['scale'] for t in t_left_list)
     total_right_thick = sum(t['thick'] * t['scale'] for t in t_right_list)
 
-    TEXT_PAD_X = 250      # 좌우 텍스트(X{qty} 등) 여백
-    TEXT_PAD_TOP = 950    # 상단 헤더(순번/모델/유리사양 2줄, h+400 시작점 기준) 여백 — 잘림 방지로 확장
-    TEXT_PAD_BOT = 350    # 하단 사이즈 텍스트 여백
+    # ★★★ [핵심 수정] 패딩을 고정 mm값이 아니라, 실제 폰트 크기를 mm로 정확히 환산해서 계산.
+    # 기존엔 TEXT_PAD_TOP=950(고정) 같은 값이 도면 크기와 무관하게 항상 더해져서,
+    # 작은 도면일수록 "고정 패딩"이 차지하는 비중이 커져 실제 크기 차이가 화면에서 둔화되는 문제가 있었음.
+    # 공식: 1pt 글자 높이(mm) = (fontsize/72) / mm_to_inch.  줄간격(linespacing)도 반영.
+    _eff_mm_to_inch = mm_to_inch if mm_to_inch else 0.0015  # 호출측에서 안 넘기면(미리보기 등) 합리적 기본값 사용
+    def _line_height_mm(fontsize_pt, linespacing=1.0):
+        return (fontsize_pt / 72) / _eff_mm_to_inch * linespacing
+
+    TEXT_PAD_X = max(_line_height_mm(8) * 3, 80)   # 좌우 텍스트(X{qty} 등) 여백 — 최소한의 시각적 여유만
+    # 상단: 제목 2줄(11pt, 줄간격1.3) + 유리사양 1줄(9pt) + 텍스트 시작오프셋(400) + 윗줄 약간의 호흡 여백
+    TEXT_PAD_TOP = 400 + _line_height_mm(11, 1.3) * 2 + _line_height_mm(9, 1.2) + _line_height_mm(9) * 0.6
+    # 하단: 사이즈 텍스트 1줄(11pt) + 시작오프셋(260) + 약간의 호흡 여백
+    TEXT_PAD_BOT = 260 + _line_height_mm(11, 1.2) + _line_height_mm(11) * 0.6
 
     # ★ [요청3] 유리사양 텍스트가 본체 폭(w)보다 넓게 퍼질 수 있으므로(예: "28T 투명+투명(V) / P_28T 더블로이+투명(V)"),
     # 실측 기반 정확한 공식으로 텍스트 폭을 mm로 환산해 박스가 텍스트를 완전히 감싸도록 좌우 패딩에 반영.
     # 공식 유도: fontsize(pt) -> inch 환산(/72) -> mm 좌표계 환산(/mm_to_inch) -> 평균 글자폭 보정계수(0.82, 실측값)
-    _eff_mm_to_inch = mm_to_inch if mm_to_inch else 0.0015  # 호출측에서 안 넘기면(미리보기 등) 합리적 기본값 사용
     def _estimate_text_halfwidth_mm(text, fontsize_pt):
         if not text: return 0
         char_w_mm = (fontsize_pt / 72) / _eff_mm_to_inch * 0.82
@@ -659,8 +668,8 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     title_halfwidth = _estimate_text_halfwidth_mm(title_line2_preview, 11)
     TEXT_OVERFLOW_PAD = max(glass_halfwidth, title_halfwidth, w / 2) - w / 2  # 본체 절반보다 텍스트가 더 넓을 때만 추가 패딩 발생
 
-    # ★ [요청4] 핸들높이 라벨("핸들: 500" 텍스트)이 박스 밖으로 나가지 않도록 우측 패딩을 별도로 추가 확보
-    HANDLE_LABEL_PAD = 550 if (handle_h and not ("핸들" in door_info and "힌지" in door_info)) else 0
+    # ★ [요청4] 핸들높이 라벨("핸들: 500" 텍스트)이 박스 밖으로 나가지 않도록 우측 패딩을 별도로 추가 확보 (고정값 대신 실제 폰트 크기 기반)
+    HANDLE_LABEL_PAD = (_line_height_mm(9) * 11) if (handle_h and not ("핸들" in door_info and "힌지" in door_info)) else 0
 
     content_left  = -total_left_thick - TEXT_PAD_X - TEXT_OVERFLOW_PAD
     content_right = w + total_right_thick + max(TEXT_PAD_X, HANDLE_LABEL_PAD) + TEXT_OVERFLOW_PAD
@@ -720,10 +729,17 @@ def _compute_window_footprint(win, mm_to_inch=None):
     total_left = sum(t['thick'] * t['scale'] for t in t_left_list)
     total_right = sum(t['thick'] * t['scale'] for t in t_right_list)
 
-    # ★ [요청3] 헤더(순번/모델명/창형태 2줄) + 유리사양 줄 + 하단 사이즈 텍스트까지 전부 mm 환산해서 포함
-    TEXT_PAD_X, TEXT_PAD_TOP, TEXT_PAD_BOT, BOX_PAD = 250, 950, 350, 120
+    # ★★★ [핵심 수정] render_window_on_ax와 동일하게, 고정 mm 패딩이 아니라 실제 폰트 크기 기반 동적 패딩 사용
+    _eff_mm_to_inch = mm_to_inch if mm_to_inch else 0.0015
+    def _line_height_mm(fontsize_pt, linespacing=1.0):
+        return (fontsize_pt / 72) / _eff_mm_to_inch * linespacing
+
+    TEXT_PAD_X = max(_line_height_mm(8) * 3, 80)
+    TEXT_PAD_TOP = 400 + _line_height_mm(11, 1.3) * 2 + _line_height_mm(9, 1.2) + _line_height_mm(9) * 0.6
+    TEXT_PAD_BOT = 260 + _line_height_mm(11, 1.2) + _line_height_mm(11) * 0.6
+    BOX_PAD = 120
     handle_h = win.get('핸들높이')
-    right_pad = 550 if handle_h else TEXT_PAD_X
+    right_pad = (_line_height_mm(9) * 11) if handle_h else TEXT_PAD_X  # "핸들: 500" 라벨 폭 근사(약 11글자)
 
     text_overflow_pad = 0
     if mm_to_inch:
