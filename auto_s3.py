@@ -695,7 +695,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     ax.add_patch(patches.FancyBboxPatch(
         (box_x, box_y), box_w, box_h,
         boxstyle=f"round,pad=0,rounding_size={corner_r}",
-        facecolor='none', edgecolor='#9CA3AF', linewidth=0.9, zorder=-10, clip_on=False
+        facecolor='none', edgecolor='#D1D5DB', linewidth=0.5, zorder=-10, clip_on=False
     ))
     for _txt in ax.texts:
         _txt.set_clip_on(False)
