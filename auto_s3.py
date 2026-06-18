@@ -680,7 +680,10 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     text_extra_halfwidth = max(glass_hw, title_hw, size_hw, (content_right - content_left) / 2) - (content_right - content_left) / 2
 
     BOX_PAD = 60
-    box_x = content_left - BOX_PAD - text_extra_halfwidth
+    # ★ [좌우 비대칭 버그 수정] handle_label_extra_right는 본체 우측에 핸들 라벨을 위한 공간을 추가하는데,
+    # 이를 box_w에만 더하면 본체+텍스트(모두 w/2 중심)가 박스 안에서 좌측으로 쏠려 보인다.
+    # box_x도 그 절반만큼 왼쪽으로 같이 밀어주면, 본체가 박스의 새로운 중심에 맞춰져 좌우 대칭으로 보인다.
+    box_x = content_left - BOX_PAD - text_extra_halfwidth - handle_label_extra_right / 2
     box_w = (content_right - content_left) + BOX_PAD * 2 + text_extra_halfwidth * 2 + handle_label_extra_right
     # ★ 박스 전체 = 헤더공간 + 본체(통바포함) + 호흡여백(상하) + 사이�: 모두 mm 단위로 합산
     box_top = body_top + header_h_mm
