@@ -398,7 +398,7 @@ def parse_any_quotation(file_buffer):
 # ==========================================
 # 3. 렌더링 엔진
 # ==========================================
-def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, glass_in, glass_out, handle_h, vent_dir, has_screen, t_top_str, t_bot_str, t_left_str, t_right_str, scale_bounds=None, repeat_count=1, unit_w=None, cell_h_mm=None, mm_to_inch=None, text_top_inch=None, text_bot_inch=None, ax_total_h_inch=None, ax_total_w_inch=None):
+def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, glass_in, glass_out, handle_h, vent_dir, has_screen, t_top_str, t_bot_str, t_left_str, t_right_str, scale_bounds=None, repeat_count=1, unit_w=None, cell_h_mm=None, mm_to_inch=None):
     
     t_upper = str(win_type).upper().replace(" ", "")
     glass_combined = str(glass_in) + str(glass_out)
@@ -629,94 +629,90 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         right_txt = "\n".join(right_stacked_texts)
         ax.text(right_idx_x, right_label_y, right_txt, ha='center', va='center', fontsize=8, fontweight='bold', color='red', bbox=txt_bbox)
     
-    # ★★★ [핵심 재설계] 바운딩 박스(스케일 결정 영역) = 오직 본체 + 통바 두께로만 계산.
-    # 제목/유리사양/사이즈텍스트/핸들라벨 등 모든 텍스트는 고정 폰트 크기로, 이 박스 크기와 무관하게
-    # 박스 위/아래에 '고정 inch 공간(text_top_inch/text_bot_inch)'을 통해 표시된다.
-    # 이렇게 해야 작은 창과 큰 창의 스케일 차이가 텍스트에 가려지지 않고 정확히 비례해서 보인다.
+    # ★★★ [완전 재설계] 바운딩 박스 = 헤더(제목2줄+유리사양) + 본체(통바포함) + 사이즈텍스트 전체를 1세트로 묶는다.
+    # 텍스트 높이도 mm_to_inch 공통 스케일로 정확히 환산해서 박스 안에 포함시키므로,
+    # 모든 도면이 동일한 절대(mm) 텍스트 높이를 갖고, 그 결과 같은 inch로 표시된다 (스케일 일치 보장).
     total_top_thick = sum(t['thick'] * t['scale'] for t in t_top_list)
     total_bot_thick = sum(t['thick'] * t['scale'] for t in t_bot_list)
     total_left_thick = sum(t['thick'] * t['scale'] for t in t_left_list)
     total_right_thick = sum(t['thick'] * t['scale'] for t in t_right_list)
 
+    _eff_mm_to_inch = mm_to_inch if mm_to_inch else 0.0015
+    def _h_mm(fontsize_pt, linespacing=1.0):
+        return (fontsize_pt / 72) / _eff_mm_to_inch * linespacing
+
+    # 상단 텍스트 영역(mm): 시작오프셋(400) + 제목2줄(11pt,줄간격1.3) + 유리사양1줄(9pt) + 약간의 여백
+    header_h_mm = 400 + _h_mm(11, 1.3) * 2 + _h_mm(9, 1.2) + _h_mm(9) * 0.5
+    # 하단 텍스트 영역(mm): 시작오프셋(260) + 사이즈텍스트1줄(11pt) + 약간의 여백
+    footer_h_mm = 260 + _h_mm(11, 1.2) + _h_mm(11) * 0.5
+
     content_left  = -total_left_thick
     content_right = w + total_right_thick
-    content_top   = h + total_top_thick
-    content_bot   = -total_bot_thick
+    body_top   = h + total_top_thick
+    body_bot   = -total_bot_thick
 
-    VIEW_W = content_right - content_left
-    VIEW_H = content_top - content_bot
+    # ★ [요청1] 가로 폭도 "헤더+사이즈 텍스트가 본체보다 넓을 때"를 포함해 1세트로 묶는다.
+    # 실측 기반 정확한 공식: 글자당 평균 폭(mm) = (fontsize/72) / mm_to_inch * 0.82 (검증된 보정계수)
+    def _text_halfwidth_mm(text, fontsize_pt):
+        if not text: return 0
+        char_w_mm = (fontsize_pt / 72) / _eff_mm_to_inch * 0.82
+        return (len(text) * char_w_mm) / 2
 
-    # ★ [요청1,5] 바운딩 박스: 내부 투명(빈 채움) + 둥근 모서리 + 얇은 중회색 보조선 (본체+통바 크기 기준, 작은 호흡 여백만 추가)
+    glass_text_for_width = ""
+    if glass_in and glass_out: glass_text_for_width = f"{glass_in} / {glass_out}"
+    elif glass_in: glass_text_for_width = glass_in
+    elif glass_out: glass_text_for_width = glass_out
+    title_line2_for_width = f"{display_name} / {win_type}"
+    size_label_for_width = f"{w} x {h}"
+
+    glass_hw = _text_halfwidth_mm(glass_text_for_width, 9)
+    title_hw = _text_halfwidth_mm(title_line2_for_width, 11)
+    size_hw = _text_halfwidth_mm(size_label_for_width, 11)
+    body_center_x = (content_left + content_right) / 2  # = w/2, 텍스트도 이 중심으로 좌우대칭
+    text_extra_halfwidth = max(glass_hw, title_hw, size_hw, (content_right - content_left) / 2) - (content_right - content_left) / 2
+
     BOX_PAD = 60
-    box_x = content_left - BOX_PAD
-    box_y = content_bot - BOX_PAD
-    box_w = VIEW_W + BOX_PAD * 2
-    box_h = VIEW_H + BOX_PAD * 2
-    corner_r = min(box_w, box_h) * 0.05  # 박스 크기에 비례한 둥근 모서리 반경
+    box_x = content_left - BOX_PAD - text_extra_halfwidth
+    box_w = (content_right - content_left) + BOX_PAD * 2 + text_extra_halfwidth * 2
+    # ★ 박스 전체 = 헤더공간 + 본체(통바포함) + 호흡여백(상하) + 사이�: 모두 mm 단위로 합산
+    box_top = body_top + header_h_mm
+    box_bot = body_bot - footer_h_mm - BOX_PAD
+    box_h = box_top - box_bot
+    box_y = box_bot
 
+    corner_r = min(box_w, box_h) * 0.04
     ax.add_patch(patches.FancyBboxPatch(
         (box_x, box_y), box_w, box_h,
         boxstyle=f"round,pad=0,rounding_size={corner_r}",
         facecolor='none', edgecolor='#9CA3AF', linewidth=0.9, zorder=-10, clip_on=False
     ))
-
-    # ★ 모든 텍스트 객체에 clip_on=False를 적용해, axes 영역(아래에서 확장된 xlim/ylim) 안에서는
-    # 항상 보이도록 처리 (텍스트 공간이 박스보다 위/아래로 더 넓게 ylim에 포함되어 있으므로 보통은 불필요하지만 안전장치로 유지)
     for _txt in ax.texts:
         _txt.set_clip_on(False)
 
-    # ★★★ [핵심] axes 물리적 크기는 generate_a3_pdf_and_images에서 이미
-    # (box_w_inch, row_h_inch + text_top_inch + text_bot_inch) 로 고정되어 있다.
-    # 여기서는 그 물리적 비율에 정확히 맞는 데이터좌표(xlim/ylim)를 구성해야
-    # 박스가 찌그러지지 않고, 텍스트 공간도 정확한 비율로 위/아래에 자리잡는다.
-    if ax_total_h_inch is not None and mm_to_inch and text_top_inch is not None and text_bot_inch is not None:
-        # 텍스트 여백(inch)을 현재 mm 좌표계로 환산
-        text_top_mm = text_top_inch / mm_to_inch
-        text_bot_mm = text_bot_inch / mm_to_inch
+    # ★ [상단 정렬] 박스 자신의 높이(box_h)가 그 행의 최대 높이(cell_h_mm)보다 작으면,
+    # 차이만큼을 박스 '아래쪽'에 빈 여백으로 추가해 항상 박스 상단이 행 상단에 맞춰지게 한다.
+    extra_below = max(0, (cell_h_mm - box_h)) if cell_h_mm is not None else 0
 
-        # 도면 박스(box_h)가 행 높이(cell_h_mm)보다 작을 수 있음 — 그 차이는 박스 아래쪽에 빈 여백으로 추가되어
-        # "모든 도면이 상단 정렬"되도록 한다 (요청4).
-        extra_below_box = max(0, (cell_h_mm - box_h)) if cell_h_mm is not None else 0
-
-        y_top = box_y + box_h + text_top_mm       # 맨 위: 텍스트 상단 공간
-        y_bot = box_y - extra_below_box - text_bot_mm  # 맨 아래: 행여백(상단정렬용) + 텍스트 하단 공간
-
-        # ★ [텍스트 겹침 방지] axes 전체 가로 폭(ax_total_w_inch)이 박스 폭(box_w)보다 넓을 수 있음
-        # (제목/유리사양 텍스트가 본체보다 길 때). 이 경우 박스를 axes 가로 중앙에 배치해서
-        # 박스는 정확한 비율을 유지하면서 텍스트만 좌우로 더 넓은 여유 공간을 갖게 한다.
-        if ax_total_w_inch is not None:
-            total_x_mm = ax_total_w_inch / mm_to_inch
-            extra_x = max(0, total_x_mm - box_w)
-            x_left = box_x - extra_x / 2
-            x_right = box_x + box_w + extra_x / 2
-        else:
-            x_left, x_right = box_x, box_x + box_w
-
-        ax.set_xlim(x_left, x_right)
-        ax.set_ylim(y_bot, y_top)
-    elif cell_h_mm is not None and cell_h_mm > box_h:
-        extra = cell_h_mm - box_h
-        ax.set_xlim(box_x, box_x + box_w)
-        ax.set_ylim(box_y - extra, box_y + box_h)
-    else:
-        ax.set_xlim(box_x, box_x + box_w)
-        ax.set_ylim(box_y, box_y + box_h)
+    ax.set_xlim(box_x, box_x + box_w)
+    ax.set_ylim(box_y - extra_below, box_y + box_h)
     ax.set_axis_off()
-    # 주의: set_aspect('equal')를 쓰지 않음 — axes 물리적 크기(인치)가 이미 MM_TO_INCH 공통 스케일로
-    # 정확히 설정되어 있으므로(generate_a3_pdf_and_images), 여기서 aspect를 다시 강제하면 공통 스케일이 깨진다.
+    # 주의: set_aspect('equal')를 쓰지 않음 — axes 물리적 크기(인치)가 generate_a3_pdf_and_images에서
+    # 이미 (box_w * MM_TO_INCH, cell_h_mm * MM_TO_INCH) 로 정확히 설정되어 있으므로, 데이터좌표 범위와
+    # 물리적 인치 비율이 항상 같다. 여기서 aspect를 강제하면 오히려 공통 스케일이 깨진다.
 
-    # 이 도면이 실제로 차지하는 면적(mm) 반환 → 출력엔진의 동적 그리드 배치에 사용
+    # 이 도면이 실제로 차지하는 전체 면적(mm, 헤더+본체+사이즈텍스트 포함) 반환 → 출력엔진의 그리드 배치에 사용
     return box_w, box_h
 
 # ==========================================
 # 4. 출력 엔진 
 # ==========================================
 def _compute_window_footprint(win, mm_to_inch=None):
-    """이 도면이 실제로 필요로 하는 가로/세로 크기를 mm 단위로 계산.
-    ★★★ [핵심] 스케일(셀 크기) 계산은 오직 '본체(창문 그림) + 통바' 크기로만 결정한다.
-    제목/유리사양/사이즈텍스트/#(망)/핸들라벨 등 모든 텍스트는 고정 폰트 크기로 표시되며
-    스케일 계산에 전혀 영향을 주지 않는다 (텍스트는 박스 밖으로 자유롭게 오버플로우).
-    이렇게 해야 작은 창과 큰 창의 크기 차이가 텍스트 패딩에 가려지지 않고 정확히 비례한다."""
+    """이 도면이 실제로 차지하는 전체 박스 크기를 mm 단위로 계산.
+    ★★★ [완전 재설계] 박스 = 헤더(제목2줄+유리사양) + 본체(통바포함) + 사이즈텍스트 전체를 1세트로 묶는다.
+    render_window_on_ax의 박스 계산 로직과 정확히 동일한 공식을 사용해야
+    레이아웃 단계(여기)와 실제 렌더링 단계의 박스 크기가 일치한다.
+    mm_to_inch가 주어지면(2차 계산) 실측 기반 정확한 텍스트 크기를 반영하고,
+    없으면(1차 추정) 합리적 기본 스케일로 근사한다."""
     t_top_list = parse_tongba_input(win['auto_top'], win['가로(W)'])
     t_bot_list = parse_tongba_input(win['auto_bot'], win['가로(W)'])
     t_left_list = parse_tongba_input(win['auto_left'], win['세로(H)'])
@@ -727,34 +723,34 @@ def _compute_window_footprint(win, mm_to_inch=None):
     total_left = sum(t['thick'] * t['scale'] for t in t_left_list)
     total_right = sum(t['thick'] * t['scale'] for t in t_right_list)
 
-    # ★ 본체 + 통바 두께만으로 footprint를 계산. 텍스트 관련 패딩은 의도적으로 제외.
-    BOX_PAD = 60  # 박스 테두리와 본체/통바 사이의 작은 시각적 호흡 여백(고정, 미미한 수준)
+    w_val, h_val = win['가로(W)'], win['세로(H)']
+    _eff_mm_to_inch = mm_to_inch if mm_to_inch else 0.0015
+    def _h_mm(fontsize_pt, linespacing=1.0):
+        return (fontsize_pt / 72) / _eff_mm_to_inch * linespacing
+    def _text_halfwidth_mm(text, fontsize_pt):
+        if not text: return 0
+        char_w_mm = (fontsize_pt / 72) / _eff_mm_to_inch * 0.82
+        return (len(text) * char_w_mm) / 2
 
-    footprint_w = win['가로(W)'] + total_left + total_right + BOX_PAD * 2
-    footprint_h = win['세로(H)'] + total_top + total_bot + BOX_PAD * 2
-    return footprint_w, footprint_h
+    header_h_mm = 400 + _h_mm(11, 1.3) * 2 + _h_mm(9, 1.2) + _h_mm(9) * 0.5
+    footer_h_mm = 260 + _h_mm(11, 1.2) + _h_mm(11) * 0.5
 
-
-def _estimate_title_text_width_inch(win, mm_to_inch):
-    """제목/유리사양 텍스트가 실제로 필요로 하는 가로 폭(inch)을 추정한다.
-    ★ 이 값은 스케일(박스 크기) 계산에는 전혀 영향을 주지 않고, 오직 '칸과 칸 사이 가로 간격'을
-    텍스트가 옆 칸을 침범하지 않을 만큼 충분히 벌리는 데에만 사용된다 (요청: 텍스트는 고정폰트,
-    박스는 실제 비율 — 다만 텍스트가 옆 칸과 겹치면 안 되므로 칸 간격만 보정)."""
-    if not mm_to_inch:
-        return 0
-    def _char_w_inch(fontsize_pt):
-        return (fontsize_pt / 72) * 0.82  # 실측 보정계수(기존과 동일), inch 단위 그대로
-
-    display_name = win.get('모델명') or win.get('제품명', '')
-    title_line2 = f"{display_name} / {win.get('형태', '')}"
     glass_in, glass_out = win.get('glass_in', ''), win.get('glass_out', '')
     glass_text = f"{glass_in} / {glass_out}" if (glass_in and glass_out) else (glass_in or glass_out)
+    display_name = win.get('모델명') or win.get('제품명', '')
+    title_line2 = f"{display_name} / {win.get('형태', '')}"
+    size_label = f"{w_val} x {h_val}"
 
-    title_w_inch = len(title_line2) * _char_w_inch(11)
-    glass_w_inch = len(glass_text) * _char_w_inch(9)
-    size_label = f"{win['가로(W)']} x {win['세로(H)']}"
-    size_w_inch = len(size_label) * _char_w_inch(11)
-    return max(title_w_inch, glass_w_inch, size_w_inch)
+    glass_hw = _text_halfwidth_mm(glass_text, 9)
+    title_hw = _text_halfwidth_mm(title_line2, 11)
+    size_hw = _text_halfwidth_mm(size_label, 11)
+    body_halfwidth = (w_val + total_left + total_right) / 2
+    text_extra_halfwidth = max(glass_hw, title_hw, size_hw, body_halfwidth) - body_halfwidth
+
+    BOX_PAD = 60
+    footprint_w = (w_val + total_left + total_right) + BOX_PAD * 2 + text_extra_halfwidth * 2
+    footprint_h = (h_val + total_top + total_bot) + header_h_mm + footer_h_mm + BOX_PAD
+    return footprint_w, footprint_h
 
 
 def _layout_page_grid(chunk, n_cols, page_w_mm_budget, mm_to_inch=None):
@@ -796,22 +792,16 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
     MARGIN_INCH = 0.28    # ★ [요청2] 페이지 테두리 ~ 첫 도면 시작점까지의 기준 여백 (모든 방향 동일) — 레이아웃선과 박스 사이 여유 확보
     GAP_INCH = 0.20       # ★ [요청3] 도면 사이 간격 — 이후 모든 칸 배치의 '기준 간격'
 
-    # ★★★ [핵심] 텍스트(제목 2줄/유리사양/사이즈/핸들라벨 등)는 고정 폰트 크기이며 스케일과 무관하게
-    # 항상 동일한 '절대 inch 공간'을 차지한다. 이 공간을 행 위/아래에 고정으로 더해서
-    # 박스(스케일 영역)가 작아도 텍스트가 옆/위/아래 칸을 침범하지 않게 한다.
-    TEXT_TOP_INCH = 0.62   # 박스 상단 ~ 제목 2줄+유리사양 텍스트가 차지하는 고정 공간
-    TEXT_BOT_INCH = 0.30   # 박스 하단 ~ 사이즈 텍스트가 차지하는 고정 공간
-
     body_w_inch = PAGE_W_INCH - MARGIN_INCH * 2
     body_h_inch = PAGE_H_INCH - HEADER_INCH - FOOTER_INCH - MARGIN_INCH * 2
     avail_w_inch = body_w_inch - GAP_INCH * (n_cols - 1)
     target_col_w_inch = avail_w_inch / n_cols
 
-    # ★ [요청2 핵심 — 버그 수정] 스케일을 "페이지당 최대 행 수(n_rows_per_page)"로 나누면,
+    # ★ [요청2 핵심] 스케일을 "페이지당 최대 행 수(n_rows_per_page)"로 나누면,
     # 실제 행이 1~2개뿐인 페이지도 강제로 3행 몫의 작은 공간만 할당받아 전부 축소되는 버그가 있었음.
     # 올바른 방법: 페이지마다 "실제 그 페이지에 필요한 행들의 mm 높이 합"이 body_h_inch 안에 들어가는
-    # 가장 큰 스케일을 찾는다. 여러 페이지가 있으면 그중 가장 빡빡한(타이트한) 페이지가 기준이 되어야
-    # 모든 페이지가 동일한 스케일을 공유하면서도 절대 넘치지 않는다.
+    # 가장 큰 스케일을 찾는다. ★ footprint는 이제 헤더+본체+사이즈텍스트를 전부 포함하므로,
+    # 별도의 텍스트 공간을 추가로 빼지 않고 그대로 사용한다.
     def _calc_mm_to_inch(text_pad_scale):
         all_fps = [_compute_window_footprint(w, text_pad_scale) for w in draw_data] if draw_data else [(2500, 2500)]
         max_w_mm = max(fw for fw, fh in all_fps)
@@ -829,10 +819,7 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
                 total_row_h_mm += max(fh for _, fh in fps)
             if total_row_h_mm <= 0:
                 continue
-            # ★ 각 행은 박스(mm 환산) 외에도 고정 텍스트 공간(TEXT_TOP_INCH+TEXT_BOT_INCH)을 차지하므로,
-            # 그 행 수만큼의 텍스트 공간을 미리 빼고 남은 인치만 박스 스케일링에 사용
-            text_space_total_inch = (TEXT_TOP_INCH + TEXT_BOT_INCH) * n_rows_here
-            max_total_row_h_inch = body_h_inch - GAP_INCH * max(0, n_rows_here - 1) - text_space_total_inch
+            max_total_row_h_inch = body_h_inch - GAP_INCH * max(0, n_rows_here - 1)
             scale_by_h = min(scale_by_h, max_total_row_h_inch / total_row_h_mm)
 
         if scale_by_h == float('inf'):
@@ -840,7 +827,7 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
         return min(scale_by_w, scale_by_h)
 
     ROUGH_MM_TO_INCH = _calc_mm_to_inch(None)
-    MM_TO_INCH = _calc_mm_to_inch(ROUGH_MM_TO_INCH)  # 2차: 실측 텍스트 폭 반영해 정확한 스케일 확정
+    MM_TO_INCH = _calc_mm_to_inch(ROUGH_MM_TO_INCH)  # 2차: 실측 텍스트 크기 반영해 정확한 스케일 확정
 
     with PdfPages(pdf_buf) as pdf:
         for page_num, chunk in enumerate(chunks):
@@ -862,44 +849,34 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
             cursor_y_inch = body_top_y_inch
 
             for r_idx, row in enumerate(row_items):
-                row_h_inch = row_heights_mm[r_idx] * MM_TO_INCH
+                row_h_inch = row_heights_mm[r_idx] * MM_TO_INCH  # ★ 이 행의 박스(헤더+본체+사이즈 전체) 높이
                 cursor_x_inch = MARGIN_INCH  # ★ [요청7] 모든 행이 동일한 좌측 시작선 공유
                 for c_idx, (win, fw_mm, fh_mm) in enumerate(row):
-                    col_w_inch = fw_mm * MM_TO_INCH
+                    col_w_inch = fw_mm * MM_TO_INCH  # ★ 이 칸의 박스(헤더+본체+사이즈 전체) 폭
 
+                    ax_left = cursor_x_inch / PAGE_W_INCH
+                    ax_bottom = (cursor_y_inch - row_h_inch) / PAGE_H_INCH
+                    ax_w = col_w_inch / PAGE_W_INCH
+                    ax_h = row_h_inch / PAGE_H_INCH
+
+                    ax = fig.add_axes([ax_left, ax_bottom, ax_w, ax_h])
                     if win is None:
-                        ax = fig.add_axes([cursor_x_inch / PAGE_W_INCH, (cursor_y_inch - row_h_inch) / PAGE_H_INCH, col_w_inch / PAGE_W_INCH, row_h_inch / PAGE_H_INCH])
                         ax.axis('off')
                         cursor_x_inch += col_w_inch + GAP_INCH
                         continue
 
-                    # ★★★ [핵심] axes 물리적 크기 = max(박스(스케일) 크기, 텍스트가 필요한 최소 폭) + 고정 텍스트 공간(inch).
-                    # 박스 자체는 정확한 mm 비례를 유지하면서(스케일 왜곡 없음), 텍스트가 박스보다 넓을 때는
-                    # 칸 자체를 텍스트 폭만큼 넓혀서 옆 칸과 겹치지 않게 한다 (박스는 그 안에서 가로 중앙 정렬).
-                    text_w_inch = _estimate_title_text_width_inch(win, MM_TO_INCH)
-                    ax_total_w_inch = max(col_w_inch, text_w_inch)
-                    ax_total_h_inch = row_h_inch + TEXT_TOP_INCH + TEXT_BOT_INCH
-
-                    ax_left = cursor_x_inch / PAGE_W_INCH
-                    ax_bottom = (cursor_y_inch - ax_total_h_inch) / PAGE_H_INCH
-                    ax_w = ax_total_w_inch / PAGE_W_INCH
-                    ax_h = ax_total_h_inch / PAGE_H_INCH
-
-                    ax = fig.add_axes([ax_left, ax_bottom, ax_w, ax_h])
                     render_window_on_ax(
                         ax, win['순번'], win['unit_w'] * win.get('repeat_count', 1), win['세로(H)'], win['w1'], win['형태'], win['위치'],
                         win['제품명'], win['모델명'], win['glass_in'], win['glass_out'], win.get('핸들높이'), win['vent_dir'], win['has_screen'],
                         win['auto_top'], win['auto_bot'], win['auto_left'], win['auto_right'],
                         repeat_count=win.get('repeat_count', 1), unit_w=win.get('unit_w'),
-                        cell_h_mm=fh_mm, mm_to_inch=MM_TO_INCH,
-                        text_top_inch=TEXT_TOP_INCH, text_bot_inch=TEXT_BOT_INCH,
-                        ax_total_h_inch=ax_total_h_inch, ax_total_w_inch=ax_total_w_inch
+                        cell_h_mm=fh_mm, mm_to_inch=MM_TO_INCH
                     )
-                    # ★ [요청2,3 핵심 수정] 다음 칸은 "균등 칸 폭"이 아니라 "이 칸의 실제 점유 폭(ax_total_w_inch) + 고정 간격(GAP_INCH)"만큼 이동.
-                    # 텍스트 때문에 칸이 넓어졌다면 그만큼 다음 칸도 더 멀리서 시작해 겹침을 방지한다.
-                    cursor_x_inch += ax_total_w_inch + GAP_INCH
+                    # ★ [요청2,3 핵심] 다음 칸은 "이 박스의 실제 폭(col_w_inch) + 고정 간격(GAP_INCH)"만큼 이동.
+                    # 박스 자체에 이미 텍스트 폭이 필요한 만큼 포함되어 있으므로, 옆 칸과 자동으로 겹치지 않는다.
+                    cursor_x_inch += col_w_inch + GAP_INCH
 
-                cursor_y_inch -= (row_h_inch + TEXT_TOP_INCH + TEXT_BOT_INCH + GAP_INCH)
+                cursor_y_inch -= (row_h_inch + GAP_INCH)
 
             footer_h_frac = FOOTER_INCH / PAGE_H_INCH
             footer_text = f"💡 {HOMECC_SLOGAN}   (Page {page_num+1}/{len(chunks)})"
@@ -1088,16 +1065,10 @@ if uploaded_file:
                             curr_left = st.session_state[f"saved_left_{uid}"]
                             curr_right = st.session_state[f"saved_right_{uid}"]
 
-                            # ★ [요청2,6] 이 도면의 실제 footprint(mm, 본체+통바)에 공통 스케일을 곱해 카드의 '도면 영역' 크기를 결정.
-                            # 텍스트는 별도의 고정 inch 공간(PREVIEW_TEXT_TOP/BOT_INCH)에 표시되어 카드 밖으로 넘치지 않게 한다.
-                            PREVIEW_TEXT_TOP_INCH = 0.35
-                            PREVIEW_TEXT_BOT_INCH = 0.18
+                            # ★ [요청2,6] 이 도면의 실제 footprint(mm, 헤더+본체+사이즈 전체)에 공통 스케일을 곱해 카드 크기 결정
                             _fp_w, _fp_h = _compute_window_footprint(win, PREVIEW_MM_TO_INCH)
-                            box_w_inch = max(_fp_w * PREVIEW_MM_TO_INCH, 0.6)
-                            box_h_inch = max(_fp_h * PREVIEW_MM_TO_INCH, 0.6)
-                            text_w_inch_preview = _estimate_title_text_width_inch(win, PREVIEW_MM_TO_INCH)
-                            card_w_inch = max(box_w_inch, text_w_inch_preview)
-                            card_h_inch = box_h_inch + PREVIEW_TEXT_TOP_INCH + PREVIEW_TEXT_BOT_INCH
+                            card_w_inch = max(_fp_w * PREVIEW_MM_TO_INCH, 0.8)
+                            card_h_inch = max(_fp_h * PREVIEW_MM_TO_INCH, 0.8)
 
                             fig, ax = plt.subplots(figsize=(card_w_inch, card_h_inch))
                             
@@ -1106,9 +1077,7 @@ if uploaded_file:
                                 win['제품명'], win['모델명'], win['glass_in'], win['glass_out'], win.get('핸들높이'), win['vent_dir'], win['has_screen'],
                                 curr_top, curr_bot, curr_left, curr_right,
                                 repeat_count=win.get('repeat_count', 1), unit_w=win.get('unit_w'),
-                                mm_to_inch=PREVIEW_MM_TO_INCH,
-                                text_top_inch=PREVIEW_TEXT_TOP_INCH, text_bot_inch=PREVIEW_TEXT_BOT_INCH,
-                                ax_total_h_inch=card_h_inch, ax_total_w_inch=card_w_inch
+                                mm_to_inch=PREVIEW_MM_TO_INCH
                             )
                             
                             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
