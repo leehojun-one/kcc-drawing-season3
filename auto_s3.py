@@ -1136,50 +1136,66 @@ if uploaded_file:
             _page_h_mm = _body_h_inch / INCH_PER_MM
             _gap_mm = 0.20 / INCH_PER_MM
             _preview_scale = _pick_scale_ratio(draw_data, _page_w_mm, _page_h_mm, _gap_mm)
-            # 실제 출력 배율(1:N)과 동일한 mm→inch. 단, 화면에서 너무 크면 답답하므로 살짝 축소 계수(0.85)만 적용.
-            PREVIEW_SHRINK = 0.85
-            PREVIEW_MM_TO_INCH = (INCH_PER_MM / _preview_scale) * PREVIEW_SHRINK
-            st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율로 표시됩니다)")
+            # 실제 출력 배율(1:N)과 동일한 mm→inch를 기본으로 하되,
+            # ★ [요청1] 한 행에 4개씩 넣으려면 가장 넓은 도면이 '4열 칸 폭' 안에 들어가야 한다.
+            # 데스크탑 작업화면 본문 폭(약 8인치) / 4열 ≈ 칸당 1.9인치. 가장 넓은 도면이 이 폭을 넘으면 비례 축소.
+            _base_mm_to_inch = INCH_PER_MM / _preview_scale
+            _max_fp_w = max(_compute_window_footprint(w, _base_mm_to_inch)[0] for w in draw_data) if draw_data else 1
+            _cell_w_inch_budget = 1.9   # 4열 기준 칸 하나의 가용 폭(인치)
+            _widest_drawn_inch = _max_fp_w * _base_mm_to_inch
+            PREVIEW_SHRINK = min(0.85, _cell_w_inch_budget / _widest_drawn_inch) if _widest_drawn_inch > 0 else 0.85
+            PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK
+            st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율, 한 행 4개 기준 자동 맞춤)")
 
-            for i in range(0, len(draw_data), 3):
-                cols = st.columns(3) 
-                
-                for j in range(3):
+            # ★★★ [요청1,2,3] 작업화면도 출력처럼: 한 행에 4개씩 + 실제 출력 배율 + 상부 정렬.
+            # 상부 정렬의 핵심은 '그 행에서 가장 큰 도면의 높이'로 모든 카드 높이를 통일하는 것이다.
+            # (출력엔진의 flow layout과 동일한 원리 — 작은 도면은 박스 상단에 붙고 아래쪽에 여백이 생김)
+            COLS_PER_ROW = 4
+            for i in range(0, len(draw_data), COLS_PER_ROW):
+                row_wins = draw_data[i:i + COLS_PER_ROW]
+                # 이 행에 들어갈 도면들의 footprint를 미리 계산해, 가장 큰 높이를 행 공통 높이로 사용
+                row_fps = [_compute_window_footprint(w, PREVIEW_MM_TO_INCH) for w in row_wins]
+                row_max_fh = max(fh for _, fh in row_fps)
+                row_card_h_inch = max(row_max_fh * PREVIEW_MM_TO_INCH, 0.8)
+
+                cols = st.columns(COLS_PER_ROW)
+
+                for j in range(COLS_PER_ROW):
                     if i + j < len(draw_data):
                         win = draw_data[i+j]
                         seq = win['순번']
-                        uid = i + j 
-                        
+                        uid = i + j
+                        _fp_w, _fp_h = row_fps[j]
+
                         if f"saved_top_{uid}" not in st.session_state:
                             st.session_state[f"saved_top_{uid}"] = win['auto_top']
                             st.session_state[f"saved_bot_{uid}"] = win['auto_bot']
                             st.session_state[f"saved_left_{uid}"] = win['auto_left']
                             st.session_state[f"saved_right_{uid}"] = win['auto_right']
-                        
-                        with cols[j]: 
+
+                        with cols[j]:
                             st.markdown(f"**[{seq}] {win['위치']}**")
                             status = st.session_state.get(f"status_{uid}", "pending")
-                            
+
                             curr_top = st.session_state[f"saved_top_{uid}"]
                             curr_bot = st.session_state[f"saved_bot_{uid}"]
                             curr_left = st.session_state[f"saved_left_{uid}"]
                             curr_right = st.session_state[f"saved_right_{uid}"]
 
-                            # ★ [요청2] 이 도면의 footprint(mm)에 '실제 출력 배율'을 곱해 카드 크기 결정 → 출력과 동일 비율
-                            _fp_w, _fp_h = _compute_window_footprint(win, PREVIEW_MM_TO_INCH)
+                            # ★ 카드 폭은 자기 footprint, 높이는 '행 공통 최대 높이'로 통일 → 같은 행 모든 도면 상부 정렬
                             card_w_inch = max(_fp_w * PREVIEW_MM_TO_INCH, 0.8)
-                            card_h_inch = max(_fp_h * PREVIEW_MM_TO_INCH, 0.8)
+                            card_h_inch = row_card_h_inch
 
                             fig, ax = plt.subplots(figsize=(card_w_inch, card_h_inch))
-                            
+
                             render_window_on_ax(
                                 ax, seq, win['unit_w'] * win.get('repeat_count', 1), win['세로(H)'], win['w1'], win['형태'], win['위치'],
                                 win['제품명'], win['모델명'], win['glass_in'], win['glass_out'], win.get('핸들높이'), win['vent_dir'], win['has_screen'],
                                 curr_top, curr_bot, curr_left, curr_right,
                                 repeat_count=win.get('repeat_count', 1), unit_w=win.get('unit_w'),
-                                mm_to_inch=PREVIEW_MM_TO_INCH
+                                cell_h_mm=row_max_fh, mm_to_inch=PREVIEW_MM_TO_INCH
                             )
-                            
+
                             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
                             st.pyplot(fig, use_container_width=False)
                             plt.close(fig) 
