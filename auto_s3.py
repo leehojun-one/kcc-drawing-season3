@@ -253,7 +253,8 @@ def parse_any_quotation(file_buffer):
         model_orig = clean_kcc_name(str(main_row.get('모델명', '')).strip())
         w_shape_orig = str(main_row.get('창형태', '')).strip()
 
-        is_independent = '통바ㅁ' in w_shape_orig.replace(" ","") or '통바ㄷ' in w_shape_orig.replace(" ","")
+        _ws_norm = w_shape_orig.replace(" ","")
+        is_independent = '통바ㅁ' in _ws_norm or '통바ㄷ' in _ws_norm or '통바Π' in _ws_norm or '통바Π' in _ws_norm
         is_supplementary_tongba = not is_independent and ('CB-' in model_orig.upper() or '각도바' in model_orig)
 
         w_val_raw = pd.to_numeric(main_row.get('길이(W)'), errors='coerce')
@@ -287,7 +288,8 @@ def parse_any_quotation(file_buffer):
         model_name = clean_kcc_name(str(main_row.get('모델명', '')).strip())
         w_shape_orig = str(main_row.get('창형태', ''))
 
-        is_independent = '통바ㅁ' in w_shape_orig.replace(" ","") or '통바ㄷ' in w_shape_orig.replace(" ","")
+        _ws_norm = w_shape_orig.replace(" ","")
+        is_independent = '통바ㅁ' in _ws_norm or '통바ㄷ' in _ws_norm or '통바Π' in _ws_norm or '통바Π' in _ws_norm
         is_supplementary_tongba = not is_independent and ('CB-' in model_name.upper() or '각도바' in model_name)
         if is_supplementary_tongba: continue
 
@@ -401,9 +403,11 @@ def parse_any_quotation(file_buffer):
 def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, glass_in, glass_out, handle_h, vent_dir, has_screen, t_top_str, t_bot_str, t_left_str, t_right_str, scale_bounds=None, repeat_count=1, unit_w=None, cell_h_mm=None, mm_to_inch=None):
     
     t_upper = str(win_type).upper().replace(" ", "")
+    # ★ 엑셀에서 'ㄷ'자 공틀이 그리스 문자 Π(U+03A0)로 표기되는 경우가 있어 '통바ㄷ'로 정규화 (아래가 뚫린 사각형)
+    t_upper = t_upper.replace("통바\u03a0", "통바ㄷ").replace("\u03a0", "통바ㄷ") if "\u03a0" in t_upper else t_upper
     glass_combined = str(glass_in) + str(glass_out)
     
-    mist_color, mist_alpha, mist_hatch = '#BAE6FD', 0.28, '..'
+    mist_color, mist_alpha, mist_hatch = '#BAE6FD', 0.6, '....'
     txt_bbox = dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.85)
     
     TEXT_SIZE = 4.0
@@ -481,15 +485,15 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                 
                 if _is_left:
                     ax.text(sw/2, h/2, "▶ 좌", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(sw/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if w1 > 0: ax.text(sw/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 
                 if _is_right:
                     ax.text(sw + (w-sw)/2, h/2, "◀ 우", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(sw + (w-sw)/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if w1 > 0: ax.text(sw + (w-sw)/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                     
             elif "3W" in t_upper:
                 ax.text((splits[0] + splits[1])/2, h/2, t_upper, ha='center', va='center', color='black', fontsize=10, fontweight='bold', bbox=txt_bbox)
@@ -499,12 +503,12 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                 
                 if _is_left:
                     ax.text(splits[0]/2, h/2, "▶", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(splits[0]/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[0]/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if w1 > 0: ax.text(splits[0]/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if has_screen: ax.text(splits[0]/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 if _is_right:
                     ax.text(splits[1] + (w-splits[1])/2, h/2, "◀", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(splits[1] + (w-splits[1])/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if w1 > 0: ax.text(splits[1] + (w-splits[1])/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
 
         if handle_h and not ("핸들" in door_info and "힌지" in door_info):
             # ★ [요청3] 우측에 통바가 붙는 경우, 핸들 라벨이 통바 영역과 겹치지 않도록 통바 두께만큼 바깥으로 이동
