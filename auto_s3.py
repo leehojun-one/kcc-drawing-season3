@@ -14,6 +14,7 @@ import os
 import urllib.request
 import matplotlib.font_manager as fm
 from PIL import Image  # 💡 [요청1] 다중 페이지 이미지를 하나로 합치기 위한 이미지 처리 패키지
+from manual_form import manual_entry_form
 
 # ==========================================
 # 1. 페이지 기본 설정 및 환경 세팅
