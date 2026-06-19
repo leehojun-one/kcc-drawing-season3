@@ -403,7 +403,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     t_upper = str(win_type).upper().replace(" ", "")
     glass_combined = str(glass_in) + str(glass_out)
     
-    mist_color, mist_alpha, mist_hatch = '#BAE6FD', 0.5, '....'
+    mist_color, mist_alpha, mist_hatch = '#BAE6FD', 0.28, '..'
     txt_bbox = dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.85)
     
     TEXT_SIZE = 4.0
@@ -483,13 +483,13 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                     ax.text(sw/2, h/2, "▶ 좌", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
                     if w1 > 0: ax.text(sw/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw/2, h/2 + 250, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 
                 if _is_right:
                     ax.text(sw + (w-sw)/2, h/2, "◀ 우", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
                     if w1 > 0: ax.text(sw + (w-sw)/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 250, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                     
             elif "3W" in t_upper:
                 ax.text((splits[0] + splits[1])/2, h/2, t_upper, ha='center', va='center', color='black', fontsize=10, fontweight='bold', bbox=txt_bbox)
@@ -500,11 +500,11 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                 if _is_left:
                     ax.text(splits[0]/2, h/2, "▶", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
                     if w1 > 0: ax.text(splits[0]/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[0]/2, h/2 + 250, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(splits[0]/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 if _is_right:
                     ax.text(splits[1] + (w-splits[1])/2, h/2, "◀", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
                     if w1 > 0: ax.text(splits[1] + (w-splits[1])/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 250, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 420, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
 
         if handle_h and not ("핸들" in door_info and "힌지" in door_info):
             # ★ [요청3] 우측에 통바가 붙는 경우, 핸들 라벨이 통바 영역과 겹치지 않도록 통바 두께만큼 바깥으로 이동
@@ -878,7 +878,7 @@ def _pick_scale_ratio(draw_data, page_w_mm, page_h_mm, gap_mm, target_cols=4, ta
     ★ 핵심: footprint(실제 세계 mm)에 mm_to_inch를 곱하면 '종이 위에서 차지하는 inch'가 되고,
     이를 다시 INCH_PER_MM으로 나누면 '종이 위에서 차지하는 물리적 mm'가 된다.
     이 '종이 위 물리적 mm'을 페이지/칸의 실제 mm 크기(target_col_w_mm 등)와 비교해야 한다."""
-    STANDARD_SCALES = [30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300]
+    STANDARD_SCALES = [30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100, 125, 150, 200, 250, 300]
     if not draw_data:
         return 50
 
@@ -1120,17 +1120,23 @@ if uploaded_file:
         with col_main:
             st.subheader("🤖 프리미엄 카탈로그 뷰: 통바 편집 및 확인")
 
-            # ★ [요청6] 작업대 미리보기도 전체 도면 공통 mm→inch 스케일 적용 + 카드 자체 기본 크기 축소(작업성 개선)
-            PREVIEW_BASE_INCH = 3.6   # 가장 큰 도면이 차지할 기준 카드 크기(인치) — 기존 5.5보다 작게 줄여 화면에 더 많이 보이게 함
-            # 1차 추정 → 2차 정확한 계산 (출력엔진과 동일한 2단계 방식으로 텍스트 오버플로우 정확히 반영)
-            _rough_fp = [_compute_window_footprint(w) for w in draw_data] if draw_data else [(2500, 2500)]
-            _rough_max = max(max(fw, fh) for fw, fh in _rough_fp)
-            _ROUGH_PREVIEW_SCALE = PREVIEW_BASE_INCH / _rough_max
-            _all_fp = [_compute_window_footprint(w, _ROUGH_PREVIEW_SCALE) for w in draw_data] if draw_data else [(2500, 2500)]
-            _max_fp_w = max(fw for fw, fh in _all_fp)
-            _max_fp_h = max(fh for fw, fh in _all_fp)
-            PREVIEW_MM_TO_INCH = PREVIEW_BASE_INCH / max(_max_fp_w, _max_fp_h)
-            
+            # ★★★ [요청2] 작업대(편집) 미리보기를 '실제 출력과 동일한 배율'로 보여준다.
+            # 직원들이 여기서 통바를 수정하는데, 편집 화면과 최종 출력의 도면 크기가 다르면 혼선이 오므로
+            # 출력엔진과 똑같이 _pick_scale_ratio로 자동 배율을 구해 그 배율(1:N)로 미리보기를 렌더링한다.
+            INCH_PER_MM = 1 / 25.4
+            _A3_W_INCH = 16.53
+            _A3_H_INCH = _A3_W_INCH * (297.0 / 420.0)
+            _body_w_inch = _A3_W_INCH - 0.28 * 2
+            _body_h_inch = _A3_H_INCH - 0.5 - 0.45 - 0.28 * 2
+            _page_w_mm = _body_w_inch / INCH_PER_MM
+            _page_h_mm = _body_h_inch / INCH_PER_MM
+            _gap_mm = 0.20 / INCH_PER_MM
+            _preview_scale = _pick_scale_ratio(draw_data, _page_w_mm, _page_h_mm, _gap_mm)
+            # 실제 출력 배율(1:N)과 동일한 mm→inch. 단, 화면에서 너무 크면 답답하므로 살짝 축소 계수(0.85)만 적용.
+            PREVIEW_SHRINK = 0.85
+            PREVIEW_MM_TO_INCH = (INCH_PER_MM / _preview_scale) * PREVIEW_SHRINK
+            st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율로 표시됩니다)")
+
             for i in range(0, len(draw_data), 3):
                 cols = st.columns(3) 
                 
@@ -1155,7 +1161,7 @@ if uploaded_file:
                             curr_left = st.session_state[f"saved_left_{uid}"]
                             curr_right = st.session_state[f"saved_right_{uid}"]
 
-                            # ★ [요청2,6] 이 도면의 실제 footprint(mm, 헤더+본체+사이즈 전체)에 공통 스케일을 곱해 카드 크기 결정
+                            # ★ [요청2] 이 도면의 footprint(mm)에 '실제 출력 배율'을 곱해 카드 크기 결정 → 출력과 동일 비율
                             _fp_w, _fp_h = _compute_window_footprint(win, PREVIEW_MM_TO_INCH)
                             card_w_inch = max(_fp_w * PREVIEW_MM_TO_INCH, 0.8)
                             card_h_inch = max(_fp_h * PREVIEW_MM_TO_INCH, 0.8)
@@ -1201,7 +1207,7 @@ if uploaded_file:
         # ★★★ [요청1,2] 단일 배율(scale ratio) 선택 UI — 건축도면처럼 1:50, 1:60 등 표준 배율 중 선택.
         # 기본은 '자동'(파일에 맞는 배율을 알아서 계산)이고, 마음에 안 들면 수동으로 한 단계씩 키우거나 줄일 수 있다.
         # 배율을 바꾸면 전체 페이지 구성(몇 행/몇 페이지)이 자동으로 다시 계산된다 (flow layout 재배치).
-        STANDARD_SCALES = [30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300]
+        MANUAL_SCALES = [30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100]
         if "scale_mode" not in st.session_state:
             st.session_state["scale_mode"] = "auto"
 
@@ -1214,15 +1220,15 @@ if uploaded_file:
                     st.session_state["manual_scale"] = 50
                 chosen_scale = st.select_slider(
                     "🔍 도면 배율 직접 선택 (숫자가 작을수록 도면이 크게 보임)",
-                    options=STANDARD_SCALES,
-                    value=st.session_state["manual_scale"],
+                    options=MANUAL_SCALES,
+                    value=st.session_state.get("manual_scale", 50),
                     format_func=lambda x: f"1:{x}",
                     key="manual_scale"
                 )
                 st.caption("배율을 바꾸면 도면이 행/페이지를 넘나들며 자동으로 재배치됩니다. 마우스로 슬라이더를 끌어 즉시 조정해보세요.")
             else:
                 chosen_scale = None
-                st.caption("파일의 도면 크기에 맞춰 가장 적절한 표준 배율(1:30~1:300)을 자동으로 선택합니다.")
+                st.caption("파일의 도면 크기에 맞춰 가장 적절한 표준 배율을 자동으로 선택합니다. (보통 1:50~1:60)")
         
         if st.button("📄 도면 굽기 (출력용 PDF & 카톡용 이미지 추출)", type="primary", use_container_width=True):
             with st.spinner("도면 생성 중..."):
