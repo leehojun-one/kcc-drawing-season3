@@ -400,7 +400,7 @@ def parse_any_quotation(file_buffer):
 # ==========================================
 # 3. 렌더링 엔진
 # ==========================================
-def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, glass_in, glass_out, handle_h, vent_dir, has_screen, t_top_str, t_bot_str, t_left_str, t_right_str, scale_bounds=None, repeat_count=1, unit_w=None, cell_h_mm=None, mm_to_inch=None):
+def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, glass_in, glass_out, handle_h, vent_dir, has_screen, t_top_str, t_bot_str, t_left_str, t_right_str, scale_bounds=None, repeat_count=1, unit_w=None, cell_h_mm=None, mm_to_inch=None, view_w_mm=None):
     
     t_upper = str(win_type).upper().replace(" ", "")
     # ★ 엑셀에서 'ㄷ'자 공틀이 그리스 문자 Π(U+03A0)로 표기되는 경우가 있어 '통바ㄷ'로 정규화 (아래가 뚫린 사각형)
@@ -713,7 +713,15 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     # 차이만큼을 박스 '아래쪽'에 빈 여백으로 추가해 항상 박스 상단이 행 상단에 맞춰지게 한다.
     extra_below = max(0, (cell_h_mm - box_h)) if cell_h_mm is not None else 0
 
-    ax.set_xlim(box_x, box_x + box_w)
+    # ★ [텍스트 균일화] view_w_mm이 주어지면(작업화면 미리보기) 모든 도면을 '같은 폭의 뷰포트'로 그린다.
+    # 좌우대칭으로 패딩을 줘 창을 중앙정렬하므로, figure 캔버스 크기가 카드마다 동일해지고
+    # → 고정 포인트(pt) 텍스트가 모든 카드에서 정확히 같은 크기로 보인다. (PDF 출력은 view_w_mm=None이라 영향 없음)
+    if view_w_mm is not None and view_w_mm > box_w:
+        _xpad = (view_w_mm - box_w) / 2
+        _view_x0, _view_w = box_x - _xpad, view_w_mm
+    else:
+        _view_x0, _view_w = box_x, box_w
+    ax.set_xlim(_view_x0, _view_x0 + _view_w)
     ax.set_ylim(box_y - extra_below, box_y + box_h)
     ax.set_axis_off()
     # 주의: set_aspect('equal')를 쓰지 않음 — axes 물리적 크기(인치)가 generate_a3_pdf_and_images에서
@@ -1147,17 +1155,21 @@ if uploaded_file:
             PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK
             st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율, 한 행 4개 기준 자동 맞춤)")
 
+            # ★★★ [텍스트 균일화] 카드마다 창 크기가 달라 figure 물리크기가 제각각이면, 고정 포인트 텍스트가
+            # 크게/작게 보이는 불균형이 생긴다. 이를 막기 위해 '전체 도면 중 가장 큰 footprint'를 공통 캔버스로 삼아
+            # 모든 카드의 figure 크기를 동일하게 통일한다. 창 도면 자체는 공통 뷰포트 안에서 실제 mm 크기로
+            # 그려지므로(중앙정렬) 크고작음의 비례는 그대로 유지된다.
+            _all_fps_preview = [_compute_window_footprint(_w, PREVIEW_MM_TO_INCH) for _w in draw_data]
+            _uniform_fp_w_mm = max(fw for fw, _ in _all_fps_preview) if _all_fps_preview else 1
+            _uniform_fp_h_mm = max(fh for _, fh in _all_fps_preview) if _all_fps_preview else 1
+            _uniform_card_w_inch = max(_uniform_fp_w_mm * PREVIEW_MM_TO_INCH, 0.8)
+            _uniform_card_h_inch = max(_uniform_fp_h_mm * PREVIEW_MM_TO_INCH, 0.8)
+
             # ★★★ [요청1,2,3] 작업화면도 출력처럼: 한 행에 4개씩 + 실제 출력 배율 + 상부 정렬.
-            # 상부 정렬의 핵심은 '그 행에서 가장 큰 도면의 높이'로 모든 카드 높이를 통일하는 것이다.
-            # (출력엔진의 flow layout과 동일한 원리 — 작은 도면은 박스 상단에 붙고 아래쪽에 여백이 생김)
+            # ★ [텍스트 균일화] 카드 크기는 위에서 구한 전체 공통 크기(_uniform_card_*)로 통일하므로,
+            #    행별 높이를 따로 계산하지 않는다. (작은 도면은 공통 뷰포트 상단에 붙고 아래에 여백이 생김)
             COLS_PER_ROW = 4
             for i in range(0, len(draw_data), COLS_PER_ROW):
-                row_wins = draw_data[i:i + COLS_PER_ROW]
-                # 이 행에 들어갈 도면들의 footprint를 미리 계산해, 가장 큰 높이를 행 공통 높이로 사용
-                row_fps = [_compute_window_footprint(w, PREVIEW_MM_TO_INCH) for w in row_wins]
-                row_max_fh = max(fh for _, fh in row_fps)
-                row_card_h_inch = max(row_max_fh * PREVIEW_MM_TO_INCH, 0.8)
-
                 cols = st.columns(COLS_PER_ROW)
 
                 for j in range(COLS_PER_ROW):
@@ -1165,7 +1177,6 @@ if uploaded_file:
                         win = draw_data[i+j]
                         seq = win['순번']
                         uid = i + j
-                        _fp_w, _fp_h = row_fps[j]
 
                         if f"saved_top_{uid}" not in st.session_state:
                             st.session_state[f"saved_top_{uid}"] = win['auto_top']
@@ -1182,9 +1193,10 @@ if uploaded_file:
                             curr_left = st.session_state[f"saved_left_{uid}"]
                             curr_right = st.session_state[f"saved_right_{uid}"]
 
-                            # ★ 카드 폭은 자기 footprint, 높이는 '행 공통 최대 높이'로 통일 → 같은 행 모든 도면 상부 정렬
-                            card_w_inch = max(_fp_w * PREVIEW_MM_TO_INCH, 0.8)
-                            card_h_inch = row_card_h_inch
+                            # ★ [텍스트 균일화] 카드 폭·높이를 '전체 공통 최대 크기'로 통일 → 모든 카드 figure 동일 크기.
+                            # 창 도면은 공통 뷰포트(view_w_mm) 안에서 실제 mm 크기로 중앙정렬되어 비례는 유지된다.
+                            card_w_inch = _uniform_card_w_inch
+                            card_h_inch = _uniform_card_h_inch
 
                             fig, ax = plt.subplots(figsize=(card_w_inch, card_h_inch))
 
@@ -1193,7 +1205,7 @@ if uploaded_file:
                                 win['제품명'], win['모델명'], win['glass_in'], win['glass_out'], win.get('핸들높이'), win['vent_dir'], win['has_screen'],
                                 curr_top, curr_bot, curr_left, curr_right,
                                 repeat_count=win.get('repeat_count', 1), unit_w=win.get('unit_w'),
-                                cell_h_mm=row_max_fh, mm_to_inch=PREVIEW_MM_TO_INCH
+                                cell_h_mm=_uniform_fp_h_mm, mm_to_inch=PREVIEW_MM_TO_INCH, view_w_mm=_uniform_fp_w_mm
                             )
 
                             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
