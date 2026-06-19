@@ -1152,7 +1152,8 @@ if uploaded_file:
             _cell_w_inch_budget = 1.9   # 4열 기준 칸 하나의 가용 폭(인치)
             _widest_drawn_inch = _max_fp_w * _base_mm_to_inch
             PREVIEW_SHRINK = min(0.85, _cell_w_inch_budget / _widest_drawn_inch) if _widest_drawn_inch > 0 else 0.85
-            PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK
+            PREVIEW_ZOOM = 1.6   # ← 이 숫자만 키우면 도면이 커집니다 (텍스트는 그대로). 1.0=기본, 1.6≈60% 확대
+PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK * PREVIEW_ZOOM
             st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율, 한 행 4개 기준 자동 맞춤)")
 
             # ★★★ [텍스트 균일화] 카드마다 창 크기가 달라 figure 물리크기가 제각각이면, 고정 포인트 텍스트가
