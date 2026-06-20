@@ -14,7 +14,6 @@ import os
 import urllib.request
 import matplotlib.font_manager as fm
 from PIL import Image  # 💡 [요청1] 다중 페이지 이미지를 하나로 합치기 위한 이미지 처리 패키지
-from manual_form import manual_entry_form
 
 # ==========================================
 # 1. 페이지 기본 설정 및 환경 세팅
@@ -46,14 +45,14 @@ else:
 
 plt.rcParams['axes.unicode_minus'] = False 
 
-HOMECC_SLOGAN = "도면에 표기된 치수(사이즈)는 통바 제외한 창호 사이즈 입니다. 공간에 가치를 더하는 프리미엄 창호, KCC글라스 홈씨씨창호"
+HOMECC_SLOGAN = "공간에 가치를 더하는 프리미엄 창호, KCC글라스 홈씨씨창호"
 
 # 💡 [디테일 4&5] 통바 배경은 더 연하게, 텍스트는 진한 맞춤 색상으로!
 TONGBA_INFO = {
-    "CB-101*100": {"thick": 100, "color": "#39FF14", "text_color": "#001F66", "scale": 1.3}, 
-    "CB-100*45": {"thick": 60, "color": "#FFFF00", "text_color": "#DC2626", "scale": 1.5},   
-    "CB-45*45": {"thick": 60, "color": " #00FFFF", "text_color": "#001F66", "scale": 1.5},    
-    "CB-135": {"thick": 60, "color": "##FF00FF", "text_color": "#001F66", "scale": 1.4}       
+    "CB-101*100": {"thick": 100, "color": "#E0F2FE", "text_color": "#1E3A8A", "scale": 1.3}, 
+    "CB-100*45": {"thick": 60, "color": "#FEF9C3", "text_color": "#991B1B", "scale": 1.5},   
+    "CB-45*45": {"thick": 60, "color": "#DCFCE7", "text_color": "#14532D", "scale": 1.5},    
+    "CB-135": {"thick": 60, "color": "#F3E8FF", "text_color": "#991B1B", "scale": 1.4}       
 }
 
 # ==========================================
@@ -145,6 +144,15 @@ if not st.session_state["logged_in"]:
 def clean_kcc_name(name):
     return re.sub(r'^HW\s*ONE\s*(\(V\))?[_\s]*', '', str(name), flags=re.IGNORECASE).strip()
 
+def _safe_color(c, fallback):
+    """색 코드가 잘못됐으면(오타 등) 앱이 죽지 않게 기본색으로 대체"""
+    try:
+        import matplotlib.colors as mcolors
+        mcolors.to_rgba(c)
+        return c
+    except (ValueError, TypeError):
+        return fallback
+
 def get_tongba_style(model_str):
     t = str(model_str).upper().replace(" ", "")
     if 'CB-101*100' in t or 'CB101*100' in t: return TONGBA_INFO['CB-101*100']
@@ -183,8 +191,8 @@ def parse_tongba_input(t_str, default_len):
             'name': clean_name, 
             'qty': qty, 
             'thick': style['thick'], 
-            'color': style['color'], 
-            'text_color': style['text_color'], 
+            'color': _safe_color(style['color'], '#F3F4F6'), 
+            'text_color': _safe_color(style['text_color'], '#374151'), 
             'scale': style['scale'],
             'len': t_len 
         })
@@ -411,7 +419,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
     mist_color, mist_alpha, mist_hatch = '#BAE6FD', 0.6, '....'
     txt_bbox = dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.85)
     
-    TEXT_SIZE = 5.0
+    TEXT_SIZE = 4.0
 
     is_left_vent = "좌" in vent_dir
     is_right_vent = "우" in vent_dir
@@ -452,9 +460,9 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
             ax.add_patch(patches.Rectangle((prev_x, 0), w - prev_x, h, facecolor=mist_color, hatch=mist_hatch, edgecolor='none', alpha=mist_alpha))
 
     if '통바ㄷ' in t_upper:
-        ax.plot([0, 0, w, w], [0, h, h, 0], color='black', linewidth=1.0)
+        ax.plot([0, 0, w, w], [0, h, h, 0], color='black', linewidth=1.2)
     else:
-        rect = patches.Rectangle((0, 0), w, h, linewidth=0.8, edgecolor='black', facecolor='none')
+        rect = patches.Rectangle((0, 0), w, h, linewidth=1.0, edgecolor='black', facecolor='none')
         ax.add_patch(rect)
 
     if '통바ㅁ' not in t_upper and '통바ㄷ' not in t_upper:
@@ -486,15 +494,15 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                 
                 if _is_left:
                     ax.text(sw/2, h/2, "▶ 좌", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(sw/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if w1 > 0: ax.text(sw/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw/2, h/2 + 200, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 
                 if _is_right:
                     ax.text(sw + (w-sw)/2, h/2, "◀ 우", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(sw + (w-sw)/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if w1 > 0: ax.text(sw + (w-sw)/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
                     # 💡 [보존] 팀장님 전용 최적 간격 수치인 +250 영구 박제!
-                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 200, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if has_screen: ax.text(sw + (w-sw)/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                     
             elif "3W" in t_upper:
                 ax.text((splits[0] + splits[1])/2, h/2, t_upper, ha='center', va='center', color='black', fontsize=10, fontweight='bold', bbox=txt_bbox)
@@ -504,12 +512,12 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
                 
                 if _is_left:
                     ax.text(splits[0]/2, h/2, "▶", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(splits[0]/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[0]/2, h/2 + 200, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if w1 > 0: ax.text(splits[0]/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if has_screen: ax.text(splits[0]/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
                 if _is_right:
                     ax.text(splits[1] + (w-splits[1])/2, h/2, "◀", ha='center', va='center', fontsize=11, fontweight='bold', bbox=txt_bbox)
-                    if w1 > 0: ax.text(splits[1] + (w-splits[1])/2, h/2 - 200, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
-                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 200, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
+                    if w1 > 0: ax.text(splits[1] + (w-splits[1])/2, h/2 - 300, f"{w1}", ha='center', va='center', fontsize=12, fontweight='bold', color='red')
+                    if has_screen: ax.text(splits[1] + (w-splits[1])/2, h/2 + 300, "#(망)", ha='center', va='center', fontsize=11, fontweight='bold', color='red', bbox=txt_bbox)
 
         if handle_h and not ("핸들" in door_info and "힌지" in door_info):
             # ★ [요청3] 우측에 통바가 붙는 경우, 핸들 라벨이 통바 영역과 겹치지 않도록 통바 두께만큼 바깥으로 이동
@@ -543,7 +551,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         thick_v = t['thick'] * t['scale'] 
         t_len = t['len']
         start_x = (w - t_len) / 2 
-        ax.add_patch(patches.Rectangle((start_x, current_y), t_len, thick_v, facecolor=t['color'], edgecolor='black', linewidth=0.8))
+        ax.add_patch(patches.Rectangle((start_x, current_y), t_len, thick_v, facecolor=t['color'], edgecolor='black', linewidth=1.0))
         
         full_text = f"{t['name']} ({t['len']})" + (f" X{t['qty']}" if t['qty'] > 1 else "")
         ax.text(w/2, current_y + thick_v/2, full_text, ha='center', va='center', fontsize=TEXT_SIZE, color=t['text_color'], fontweight='bold', stretch='condensed')
@@ -556,7 +564,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         current_y -= thick_v
         t_len = t['len']
         start_x = (w - t_len) / 2 
-        ax.add_patch(patches.Rectangle((start_x, current_y), t_len, thick_v, facecolor=t['color'], edgecolor='black', linewidth=0.8))
+        ax.add_patch(patches.Rectangle((start_x, current_y), t_len, thick_v, facecolor=t['color'], edgecolor='black', linewidth=1.0))
         
         full_text = f"{t['name']} ({t['len']})" + (f" X{t['qty']}" if t['qty'] > 1 else "")
         ax.text(w/2, current_y + thick_v/2, full_text, ha='center', va='center', fontsize=TEXT_SIZE, color=t['text_color'], fontweight='bold', stretch='condensed')
@@ -568,7 +576,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         current_x -= thick_v
         t_len = t['len']
         start_y = h - t_len  # 상단 기준 정렬 (기존: 0 — 하단 기준이었음)
-        ax.add_patch(patches.Rectangle((current_x, start_y), thick_v, t_len, facecolor=t['color'], edgecolor='black', linewidth=0.8))
+        ax.add_patch(patches.Rectangle((current_x, start_y), thick_v, t_len, facecolor=t['color'], edgecolor='black', linewidth=1.0))
         
         full_text = f"{t['name']} ({t['len']})" + (f" X{t['qty']}" if t['qty'] > 1 else "")
         ax.text(current_x + thick_v/2, start_y + t_len/2, full_text, ha='center', va='center', rotation=90, fontsize=TEXT_SIZE, color=t['text_color'], fontweight='bold', stretch='condensed')
@@ -581,7 +589,7 @@ def render_window_on_ax(ax, seq, w, h, w1, win_type, loc, product, model_name, g
         thick_v = t['thick'] * t['scale']
         t_len = t['len']
         start_y = h - t_len  # 상단 기준 정렬 (기존: 0 — 하단 기준이었음)
-        ax.add_patch(patches.Rectangle((current_x, start_y), thick_v, t_len, facecolor=t['color'], edgecolor='black', linewidth=0.8))
+        ax.add_patch(patches.Rectangle((current_x, start_y), thick_v, t_len, facecolor=t['color'], edgecolor='black', linewidth=1.0))
         
         full_text = f"{t['name']} ({t['len']})" + (f" X{t['qty']}" if t['qty'] > 1 else "")
         ax.text(current_x + thick_v/2, start_y + t_len/2, full_text, ha='center', va='center', rotation=90, fontsize=TEXT_SIZE, color=t['text_color'], fontweight='bold', stretch='condensed')
@@ -986,7 +994,7 @@ def generate_a3_pdf_and_images(draw_data, p_name, s_addr, n_cols=4, items_per_pa
 
             footer_h_frac = FOOTER_INCH / PAGE_H_INCH
             footer_text = f"💡 {HOMECC_SLOGAN}   (Page {page_num+1}/{len(pages)})"
-            fig.text(0.5, footer_h_frac / 2, footer_text, ha='center', fontsize=13, color='#DC2626', fontweight='bold')
+            fig.text(0.5, footer_h_frac / 2, footer_text, ha='center', fontsize=13, color='#1E3A8A', fontweight='bold')
 
             pdf.savefig(fig)
 
@@ -1033,24 +1041,16 @@ if st.button("🔄 시스템 초기화 (새로고침)", type="primary", use_cont
             del st.session_state[key]
     st.rerun()
 
-mode = st.radio("📋 데이터 입력 방식", ["엑셀 업로드", "수기 실측 입력"], horizontal=True)
+uploaded_file = st.file_uploader("📂 견적서 엑셀 파일 업로드", type=['xlsx', 'xls'])
 
-draw_data = None
-tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = [], [], (2500, 2500), "", ""
-
-if mode == "엑셀 업로드":
-    uploaded_file = st.file_uploader("📂 견적서 엑셀 파일 업로드", type=['xlsx', 'xls'])
-    if uploaded_file:
-        if "last_file_id" not in st.session_state or st.session_state["last_file_id"] != uploaded_file.file_id:
-            for key in list(st.session_state.keys()):
-                if key.startswith("saved_") or key.startswith("status_"):
-                    del st.session_state[key]
-            st.session_state["last_file_id"] = uploaded_file.file_id
-        draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = parse_any_quotation(uploaded_file)
-else:
-    draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = manual_entry_form()
-
-if draw_data:
+if uploaded_file:
+    if "last_file_id" not in st.session_state or st.session_state["last_file_id"] != uploaded_file.file_id:
+        for key in list(st.session_state.keys()):
+            if key.startswith("saved_") or key.startswith("status_"):
+                del st.session_state[key]
+        st.session_state["last_file_id"] = uploaded_file.file_id
+        
+    draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = parse_any_quotation(uploaded_file)
 
     
     tab1, tab2 = st.tabs(["💻 1단계: 도면 작업대", "🖨️ 2단계: 출력 및 카톡 전송 센터"])
@@ -1161,8 +1161,7 @@ if draw_data:
             _cell_w_inch_budget = 1.9   # 4열 기준 칸 하나의 가용 폭(인치)
             _widest_drawn_inch = _max_fp_w * _base_mm_to_inch
             PREVIEW_SHRINK = min(0.85, _cell_w_inch_budget / _widest_drawn_inch) if _widest_drawn_inch > 0 else 0.85
-            PREVIEW_ZOOM = 1.6   # ← 이 숫자만 키우면 도면이 커집니다 (텍스트는 그대로). 1.0=기본, 1.6≈60% 확대
-            PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK * PREVIEW_ZOOM
+            PREVIEW_MM_TO_INCH = _base_mm_to_inch * PREVIEW_SHRINK
             st.caption(f"📐 현재 미리보기 배율: 1:{_preview_scale} (실제 출력과 동일한 비율, 한 행 4개 기준 자동 맞춤)")
 
             # ★★★ [텍스트 균일화] 카드마다 창 크기가 달라 figure 물리크기가 제각각이면, 고정 포인트 텍스트가
@@ -1195,7 +1194,8 @@ if draw_data:
                             st.session_state[f"saved_right_{uid}"] = win['auto_right']
 
                         with cols[j]:
-                            st.markdown(f"**[{seq}] {win['위치']}**")
+                            _card_label = f"[{seq}] {win['위치']}".strip()
+                            st.markdown(f"**{_card_label}**")
                             status = st.session_state.get(f"status_{uid}", "pending")
 
                             curr_top = st.session_state[f"saved_top_{uid}"]
