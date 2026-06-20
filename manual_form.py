@@ -310,13 +310,16 @@ def _extract_json(text):
     return []
 
 
-def _gemini_extract(image_bytes, mime, api_key):
+def _gemini_extract(image_bytes, mime, api_key, extra_instruction=""):
     if requests is None:
         raise RuntimeError("requests 패키지가 필요합니다. requirements.txt에 requests를 추가하세요.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    prompt_text = _build_extract_prompt()
+    if extra_instruction:
+        prompt_text += "\n" + extra_instruction
     payload = {
         "contents": [{"parts": [
-            {"text": _build_extract_prompt()},
+            {"text": prompt_text},
             {"inline_data": {"mime_type": mime or "image/jpeg",
                              "data": base64.b64encode(image_bytes).decode()}},
         ]}],
@@ -427,18 +430,26 @@ def _photo_autofill_section():
                          "Streamlit 앱 설정(secrets)에 GEMINI_API_KEY를 추가하세요. "
                          "키 발급(무료): https://aistudio.google.com/apikey")
                 return
-            with st.spinner("AI가 실측지를 읽는 중..."):
+            with st.spinner("AI가 실측지를 읽는 중... (1/2)"):
                 try:
-                    raw_text, finish_reason = _gemini_extract(img.getvalue(), img.type, api_key)
+                    raw_text1, fr1 = _gemini_extract(img.getvalue(), img.type, api_key,
+                                                     "★ 이번에는 표의 No.1 ~ No.10 행만 출력하세요.")
                 except Exception as e:
-                    st.error(f"읽기 실패: {e}")
-                    st.caption("💡 사진이 너무 어둡거나 흐리면 실패할 수 있습니다. 밝은 곳에서 다시 찍어보세요.")
+                    st.error(f"읽기 실패 (1차): {e}")
                     return
-            # 디버그: AI 응답 원문 표시 (접기)
+            with st.spinner("AI가 실측지를 읽는 중... (2/2)"):
+                try:
+                    raw_text2, fr2 = _gemini_extract(img.getvalue(), img.type, api_key,
+                                                     "★ 이번에는 표의 No.11 이후 ~ 마지막 행만 출력하세요. No.1~10은 이미 읽었으니 제외.")
+                except Exception as e:
+                    raw_text2, fr2 = "", "SKIP"  # 2차 실패해도 1차 결과는 유지
+
+            # 디버그
             with st.expander("🔍 AI 응답 원문 보기 (디버그)", expanded=False):
-                st.caption(f"중단사유: {finish_reason or '없음'} | 응답길이: {len(raw_text)}자")
-                st.code(raw_text[:3000] if raw_text else "(빈 응답)", language="json")
-            raw = _parse_csv_rows(raw_text)
+                st.caption(f"1차: {fr1} ({len(raw_text1)}자) | 2차: {fr2} ({len(raw_text2)}자)")
+                st.code((raw_text1 or "") + "\n---\n" + (raw_text2 or ""), language="text")
+
+            raw = _parse_csv_rows(raw_text1) + _parse_csv_rows(raw_text2)
             rows = [_norm_row(r) for r in raw if isinstance(r, dict)]
             rows = [r for r in rows if r["가로W"] > 0 or r["세로H"] > 0 or r["위치"]]
             if not rows:
