@@ -292,25 +292,24 @@ def _gemini_extract(image_bytes, mime, api_key):
             {"inline_data": {"mime_type": mime or "image/jpeg",
                              "data": base64.b64encode(image_bytes).decode()}},
         ]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 8192, "responseMimeType": "application/json"},
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 8192},
     }
     r = requests.post(url, headers={"x-goog-api-key": api_key,
                                     "Content-Type": "application/json"},
                       json=payload, timeout=120)
     if r.status_code != 200:
-        raise RuntimeError(f"Gemini API 오류 {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"Gemini API 오류 {r.status_code}: {r.text[:500]}")
     data = r.json()
     try:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
-        # 블록 이유 등 추가 정보 추출
         block_reason = ""
         try:
             block_reason = str(data.get("promptFeedback", {}).get("blockReason", ""))
         except Exception:
             pass
-        raise RuntimeError(f"응답 파싱 실패 (차단: {block_reason}): {str(data)[:500]}")
-    return _extract_json(text)
+        raise RuntimeError(f"응답 파싱 실패 (차단사유: {block_reason}): {str(data)[:500]}")
+    return text  # ★ 원본 텍스트 반환 — JSON 파싱은 호출부에서
 
 
 # ---- 값 정규화: 모델이 살짝 다른 값을 줘도 드롭다운 옵션에 맞춰 깨지지 않게 ----
@@ -396,17 +395,19 @@ def _photo_autofill_section():
                 return
             with st.spinner("AI가 실측지를 읽는 중..."):
                 try:
-                    raw = _gemini_extract(img.getvalue(), img.type, api_key)
+                    raw_text = _gemini_extract(img.getvalue(), img.type, api_key)
                 except Exception as e:
                     st.error(f"읽기 실패: {e}")
                     st.caption("💡 사진이 너무 어둡거나 흐리면 실패할 수 있습니다. 밝은 곳에서 다시 찍어보세요.")
                     return
+            # 디버그: AI 응답 원문 표시 (접기)
+            with st.expander("🔍 AI 응답 원문 보기 (디버그)", expanded=False):
+                st.code(raw_text[:2000] if raw_text else "(빈 응답)", language="json")
+            raw = _extract_json(raw_text)
             rows = [_norm_row(r) for r in raw if isinstance(r, dict)]
             rows = [r for r in rows if r["가로W"] > 0 or r["세로H"] > 0 or r["위치"]]
             if not rows:
                 st.warning("표에서 창을 찾지 못했습니다. 사진이 선명한지 확인하거나 직접 입력해 주세요.")
-                if raw:
-                    st.caption(f"AI 응답 원본 ({len(raw)}건): {str(raw)[:500]}")
                 return
             st.session_state.manual_df = pd.DataFrame(rows)
             st.session_state.pop("manual_editor", None)  # 에디터 새로 그리게
