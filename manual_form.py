@@ -216,22 +216,52 @@ def manual_entry_form():
 # =====================================================================
 
 def _build_extract_prompt():
-    """Gemini에게 보낼 추출 지시문 — 짧게 핵심만."""
+    """Gemini에게 보낼 추출 지시문 — CSV 형식으로 토큰 절약."""
     return (
-        "한국 KCC홈씨씨 창호 수기 실측지 사진입니다. '3. 실측 내역' 표의 모든 행을 읽어 JSON 배열로 출력하세요.\n"
-        "반드시 한 줄 압축 JSON. 들여쓰기/줄바꿈 금지. 표 끝까지 전부 읽으세요.\n\n"
-        "키: 위치(적용공간), 제품(141단창/251이중/230이중/115단창/225공틀/고정창/터닝도어), "
-        "형태(3W/2W/2W(U/B)/F 등), 가로W(mm정수), 세로H(mm정수), 벤트W1(mm,없으면0), "
-        "방향(N/좌/우), 내부유리(텍스트), 외부유리(이중창만,없으면빈값), "
-        "핸들높이(mm,없으면0), 방충망(true/false), 사면통바(CB-100*45등,없으면빈값)\n\n"
+        "한국 KCC홈씨씨 창호 수기 실측지 사진입니다. '3. 실측 내역' 표의 모든 행을 읽어주세요.\n"
+        "표 끝까지 전부 읽으세요. 중간에 멈추지 마세요.\n\n"
+        "출력형식: CSV (헤더 없이 데이터만). 한 행 = 한 줄. 쉼표 구분.\n"
+        "열 순서: 위치,제품,형태,가로W,세로H,벤트W1,방향,내부유리,외부유리,핸들높이,방충망,사면통바\n\n"
         "규칙:\n"
-        "- 사면공통/통바 행(W*H 있음)은 공틀창으로 별도 출력 + 위 창의 사면통바에도 값 넣기\n"
+        "- 제품: 141단창/251이중/230이중/225공틀/고정창/터닝 등 약어로\n"
+        "- 형태: 3W/2W/2W(U/B)/F 등\n"
+        "- 방향: N/좌/우\n"
+        "- 방충망: 1=있음 0=없음\n"
+        "- 사면공통 행(W*H있음)은 공틀창으로 별도 행 출력 + 위 창의 사면통바에도 값 넣기\n"
         "- 비고란 통바(L만)는 무시\n"
-        "- 특이사항의 망=#(망)→방충망true, VENT 1100→벤트W1=1100\n\n"
-        "예시: [{\"위치\":\"거실\",\"제품\":\"141단창\",\"형태\":\"3W\",\"가로W\":4635,\"세로H\":2330,"
-        "\"벤트W1\":0,\"방향\":\"N\",\"내부유리\":\"더블로이+투명\",\"외부유리\":\"\","
-        "\"핸들높이\":0,\"방충망\":true,\"사면통바\":\"\"}]"
+        "- 특이사항: 망→방충망1, VENT1100→벤트W1=1100, 핸들450→핸들높이=450\n"
+        "- 없는 값은 빈칸, 숫자 없으면 0\n\n"
+        "예시:\n"
+        "거실,141단창,3W,4635,2330,0,N,더블로이+투명,,0,1,\n"
+        "안방확장,251이중,3W,5930,2490,0,N,더블로이+투명,투명+투명,0,1,CB-100*45"
     )
+
+
+def _parse_csv_rows(text):
+    """CSV 형식 응답을 dict 리스트로 변환."""
+    keys = ["위치","제품","형태","가로W","세로H","벤트W1","방향","내부유리","외부유리","핸들높이","방충망","사면통바"]
+    rows = []
+    for line in (text or "").strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("위치"):
+            continue  # 빈 줄, 주석, 혹시 섞인 헤더 건너뜀
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 5:
+            continue  # 너무 짧은 줄 무시
+        row = {}
+        for i, k in enumerate(keys):
+            row[k] = parts[i] if i < len(parts) else ""
+        # 숫자 필드 변환
+        for nk in ["가로W","세로H","벤트W1","핸들높이"]:
+            try:
+                row[nk] = int(float(str(row.get(nk,"0")).replace(",","").strip() or "0"))
+            except (ValueError, TypeError):
+                row[nk] = 0
+        # 방충망: "1","true","망" 등 → True
+        bv = str(row.get("방충망","")).strip().lower()
+        row["방충망"] = bv in ("1","true","y","예","o","○","망","유","ㅇ")
+        rows.append(row)
+    return rows
 
 
 def _extract_json(text):
@@ -408,7 +438,7 @@ def _photo_autofill_section():
             with st.expander("🔍 AI 응답 원문 보기 (디버그)", expanded=False):
                 st.caption(f"중단사유: {finish_reason or '없음'} | 응답길이: {len(raw_text)}자")
                 st.code(raw_text[:3000] if raw_text else "(빈 응답)", language="json")
-            raw = _extract_json(raw_text)
+            raw = _parse_csv_rows(raw_text)
             rows = [_norm_row(r) for r in raw if isinstance(r, dict)]
             rows = [r for r in rows if r["가로W"] > 0 or r["세로H"] > 0 or r["위치"]]
             if not rows:
