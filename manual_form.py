@@ -267,19 +267,49 @@ def _build_extract_prompt():
 
 
 def _extract_json(text):
-    """모델 응답에서 JSON 배열만 안전하게 추출."""
+    """모델 응답에서 JSON 배열만 안전하게 추출. 잘린 JSON도 복구 시도."""
     text = (text or "").strip()
     text = _re.sub(r"^```(json)?|```$", "", text, flags=_re.MULTILINE).strip()
+
+    # 1차: 그대로 파싱
     try:
         data = json.loads(text)
+        if isinstance(data, dict): data = [data]
+        return data if isinstance(data, list) else []
     except Exception:
-        m = _re.search(r"\[.*\]", text, flags=_re.DOTALL)
-        if not m:
-            return []
-        data = json.loads(m.group(0))
-    if isinstance(data, dict):
-        data = [data]
-    return data if isinstance(data, list) else []
+        pass
+
+    # 2차: [...]를 찾아 파싱
+    m = _re.search(r"\[.*\]", text, flags=_re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            if isinstance(data, dict): data = [data]
+            return data if isinstance(data, list) else []
+        except Exception:
+            pass
+
+    # 3차: 잘린 JSON 복구 — [ 로 시작하지만 ] 없이 끊긴 경우
+    start = text.find("[")
+    if start >= 0:
+        fragment = text[start:]
+        # 마지막 완전한 },까지 자르고 ]를 붙여서 복구
+        for trim in [
+            fragment.rstrip(),                    # 그대로 + ]
+            _re.sub(r',\s*\{[^}]*$', '', fragment),  # 불완전한 마지막 객체 제거
+            _re.sub(r',\s*$', '', fragment),       # 끝의 쉼표 제거
+        ]:
+            for suffix in ["]", "}]", "\"}]"]:
+                candidate = trim.rstrip().rstrip(",").rstrip() + suffix
+                try:
+                    data = json.loads(candidate)
+                    if isinstance(data, dict): data = [data]
+                    if isinstance(data, list) and len(data) > 0:
+                        return data
+                except Exception:
+                    continue
+
+    return []
 
 
 def _gemini_extract(image_bytes, mime, api_key):
