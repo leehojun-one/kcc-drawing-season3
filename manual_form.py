@@ -16,8 +16,19 @@ draw_data 구조)으로 변환한다.
         ...
 """
 
+import json
+import base64
+import re as _re
 import pandas as pd
 import streamlit as st
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+# 사진 자동채움에 쓸 Gemini 모델 (무료 등급). 구글이 이름을 바꾸면 이 값만 교체.
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # =====================================================================
 # 1. 확정 드롭다운 목록 (견적서 49개에서 추출 — 수렴 완료)
@@ -163,6 +174,9 @@ def manual_entry_form():
     if "manual_df" not in st.session_state:
         st.session_state.manual_df = _blank_df()
 
+    # 📸 사진 자동채움 (선택) — 실측지 사진을 올리면 표가 자동으로 채워진다.
+    _photo_autofill_section()
+
     edited = st.data_editor(
         st.session_state.manual_df,
         num_rows="dynamic",
@@ -195,3 +209,172 @@ def manual_entry_form():
     else:
         st.success(f"✅ 창 {n}개 입력됨 → 아래에서 도면을 확인하세요.")
     return result
+
+
+# =====================================================================
+# 4. 📸 사진 자동채움 (Gemini 무료 등급으로 실측지 사진 → 표 자동입력)
+# =====================================================================
+
+def _build_extract_prompt():
+    """Gemini에게 보낼 추출 지시문. 허용값 목록을 박아넣어 드롭다운과 맞는 값만 뱉게 한다."""
+    return (
+        "당신은 한국 KCC홈씨씨 창호 '수기 실측지'를 읽어 표 데이터로 변환하는 도우미입니다.\n"
+        "손글씨 표의 각 창(행)을 읽어 JSON 배열로만 출력하세요. 설명/마크다운 금지, 순수 JSON만.\n\n"
+        "각 객체 키와 규칙:\n"
+        "- 위치: 적용공간 텍스트 (예: 거실발코니)\n"
+        f"- 제품: 다음 중 하나로만 → {PRODUCT_LIST}\n"
+        "  (약어 매핑: 141단창→발코니창141, 251이중→발코니이중창251, 230이중→일반이중창230, "
+        "115단창→일반단창115, 225공틀/225공통→공틀창225, 고정창→고정창, 미는문/터닝→터닝도어)\n"
+        f"- 형태: 다음 중 하나로만 → {SHAPE_LIST}\n"
+        f"- 가로W, 세로H, 벤트W1: 정수(mm). 없으면 0. 벤트W1은 U/B 등 벤트치수(예 1100), 없으면 0\n"
+        f"- 방향: 다음 중 하나 → {VENT_DIRS} (좌/우 명시 없으면 N)\n"
+        f"- 내부유리: 다음 중 하나로만 → {GLASS_INNER}\n"
+        f"- 외부유리: 이중창만, 다음 중 하나 → {GLASS_OUTER} (없으면 \"(없음)\")\n"
+        "- 핸들높이: 정수(mm). 없으면 0\n"
+        "- 방충망: 망/방충망 표기 있으면 true, 없으면 false\n"
+        f"- 사면통바: 다음 중 하나 → {TONGBA_4SIDE}. "
+        "'사면공통 100*45' 같은 통바 행은 별도 창이 아니라 '바로 위 창'의 사면통바입니다. "
+        "그 위 창의 사면통바 값(CB-100*45 등)으로 넣고, 통바 행 자체는 출력하지 마세요.\n\n"
+        "확실치 않은 칸은 빈값/0/기본값으로 두되, 가로·세로 숫자는 최대한 정확히 읽으세요.\n"
+        "출력 예: [{\"위치\":\"거실발코니\",\"제품\":\"발코니창141\",\"형태\":\"3W(1:2:1)\",\"가로W\":4000,"
+        "\"세로H\":2300,\"벤트W1\":0,\"방향\":\"N\",\"내부유리\":\"P_28T 더블로이+투명(V)\","
+        "\"외부유리\":\"(없음)\",\"핸들높이\":0,\"방충망\":true,\"사면통바\":\"(없음)\"}]"
+    )
+
+
+def _extract_json(text):
+    """모델 응답에서 JSON 배열만 안전하게 추출."""
+    text = (text or "").strip()
+    text = _re.sub(r"^```(json)?|```$", "", text, flags=_re.MULTILINE).strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        m = _re.search(r"\[.*\]", text, flags=_re.DOTALL)
+        if not m:
+            return []
+        data = json.loads(m.group(0))
+    if isinstance(data, dict):
+        data = [data]
+    return data if isinstance(data, list) else []
+
+
+def _gemini_extract(image_bytes, mime, api_key):
+    if requests is None:
+        raise RuntimeError("requests 패키지가 필요합니다. requirements.txt에 requests를 추가하세요.")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    payload = {
+        "contents": [{"parts": [
+            {"text": _build_extract_prompt()},
+            {"inline_data": {"mime_type": mime or "image/jpeg",
+                             "data": base64.b64encode(image_bytes).decode()}},
+        ]}],
+        "generationConfig": {"temperature": 0, "response_mime_type": "application/json"},
+    }
+    r = requests.post(url, headers={"x-goog-api-key": api_key,
+                                    "Content-Type": "application/json"},
+                      json=payload, timeout=120)
+    if r.status_code != 200:
+        raise RuntimeError(f"Gemini API 오류 {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        raise RuntimeError(f"응답 파싱 실패: {str(data)[:300]}")
+    return _extract_json(text)
+
+
+# ---- 값 정규화: 모델이 살짝 다른 값을 줘도 드롭다운 옵션에 맞춰 깨지지 않게 ----
+def _match_option(value, options, default):
+    v = str(value or "").strip()
+    if v in options:
+        return v
+    vc = v.replace(" ", "").lower()
+    for o in options:                      # 공백/대소문자 무시 일치
+        if o.replace(" ", "").lower() == vc:
+            return o
+    for o in options:                      # 부분 포함
+        if vc and (vc in o.replace(" ", "").lower() or o.replace(" ", "").lower() in vc):
+            return o
+    return default
+
+
+def _norm_product(v):
+    v = str(v or "").strip()
+    if v in PRODUCT_OPTIONS:
+        return v
+    if v in SHORTHAND_MAP:
+        return SHORTHAND_MAP[v]
+    vn = v.replace(" ", "")
+    hints = [("251", "발코니이중창251"), ("141", "발코니창141"), ("230", "일반이중창230"),
+             ("115", "일반단창115"), ("225", "공틀창225"), ("고정", "고정창"),
+             ("터닝", "터닝도어"), ("미는", "터닝도어")]
+    for key, prod in hints:
+        if key in vn:
+            return prod
+    return PRODUCT_LIST[0]
+
+
+def _to_int(v):
+    try:
+        return int(float(str(v).replace(",", "").strip()))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _norm_row(r):
+    prod = _norm_product(r.get("제품"))
+    shape = _match_option(r.get("형태"), SHAPE_LIST, PRODUCT_OPTIONS[prod]["shapes"][0])
+    return {
+        "위치": str(r.get("위치", "")).strip(),
+        "제품": prod,
+        "형태": shape,
+        "가로W": _to_int(r.get("가로W")),
+        "세로H": _to_int(r.get("세로H")),
+        "벤트W1": _to_int(r.get("벤트W1")),
+        "방향": _match_option(r.get("방향"), VENT_DIRS, "N"),
+        "내부유리": _match_option(r.get("내부유리"), GLASS_INNER, GLASS_INNER[0]),
+        "외부유리": _match_option(r.get("외부유리"), GLASS_OUTER, "(없음)"),
+        "핸들높이": _to_int(r.get("핸들높이")),
+        "방충망": bool(r.get("방충망", False)) if not isinstance(r.get("방충망"), str)
+                  else str(r.get("방충망")).strip().lower() in ("true", "1", "y", "예", "o", "○", "망", "유", "ㅇ"),
+        "사면통바": _match_option(r.get("사면통바"), TONGBA_4SIDE, "(없음)"),
+    }
+
+
+def _photo_autofill_section():
+    with st.expander("📸 사진으로 자동 채우기 (선택) — 실측지 사진 → 표 자동입력", expanded=False):
+        st.caption("실측지 사진을 올리고 버튼을 누르면 AI가 표를 채워줍니다. "
+                   "⚠️ 개인정보 보호를 위해 가능하면 '실측 내역 표' 부분만 잘라서 올리세요. "
+                   "(고객 이름·전화·주소가 담긴 상단은 제외 권장)")
+        img = st.file_uploader("실측지 사진", type=["png", "jpg", "jpeg"], key="manual_photo")
+        if img is None:
+            return
+        st.image(img, caption="업로드된 실측지", width=320)
+
+        if st.button("🔍 사진에서 표 자동 채우기", type="primary", key="manual_autofill_btn"):
+            # API 키 확인
+            api_key = None
+            try:
+                api_key = st.secrets.get("GEMINI_API_KEY", None)
+            except Exception:
+                api_key = None
+            if not api_key:
+                st.error("GEMINI_API_KEY가 설정되어 있지 않습니다. "
+                         "Streamlit 앱 설정(secrets)에 GEMINI_API_KEY를 추가하세요. "
+                         "키 발급(무료): https://aistudio.google.com/apikey")
+                return
+            with st.spinner("AI가 실측지를 읽는 중..."):
+                try:
+                    raw = _gemini_extract(img.getvalue(), img.type, api_key)
+                except Exception as e:
+                    st.error(f"읽기 실패: {e}")
+                    return
+            rows = [_norm_row(r) for r in raw if isinstance(r, dict)]
+            rows = [r for r in rows if r["가로W"] > 0 or r["세로H"] > 0 or r["위치"]]
+            if not rows:
+                st.warning("표에서 창을 찾지 못했습니다. 사진이 선명한지 확인하거나 직접 입력해 주세요.")
+                return
+            st.session_state.manual_df = pd.DataFrame(rows)
+            st.session_state.pop("manual_editor", None)  # 에디터 새로 그리게
+            st.success(f"✅ {len(rows)}개 창을 읽었습니다! 아래 표에서 확인·수정하세요.")
+            st.rerun()
