@@ -292,7 +292,7 @@ def _gemini_extract(image_bytes, mime, api_key):
             {"inline_data": {"mime_type": mime or "image/jpeg",
                              "data": base64.b64encode(image_bytes).decode()}},
         ]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 8192, "response_mime_type": "application/json"},
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 8192, "responseMimeType": "application/json"},
     }
     r = requests.post(url, headers={"x-goog-api-key": api_key,
                                     "Content-Type": "application/json"},
@@ -303,7 +303,13 @@ def _gemini_extract(image_bytes, mime, api_key):
     try:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
-        raise RuntimeError(f"응답 파싱 실패: {str(data)[:300]}")
+        # 블록 이유 등 추가 정보 추출
+        block_reason = ""
+        try:
+            block_reason = str(data.get("promptFeedback", {}).get("blockReason", ""))
+        except Exception:
+            pass
+        raise RuntimeError(f"응답 파싱 실패 (차단: {block_reason}): {str(data)[:500]}")
     return _extract_json(text)
 
 
@@ -393,11 +399,14 @@ def _photo_autofill_section():
                     raw = _gemini_extract(img.getvalue(), img.type, api_key)
                 except Exception as e:
                     st.error(f"읽기 실패: {e}")
+                    st.caption("💡 사진이 너무 어둡거나 흐리면 실패할 수 있습니다. 밝은 곳에서 다시 찍어보세요.")
                     return
             rows = [_norm_row(r) for r in raw if isinstance(r, dict)]
             rows = [r for r in rows if r["가로W"] > 0 or r["세로H"] > 0 or r["위치"]]
             if not rows:
                 st.warning("표에서 창을 찾지 못했습니다. 사진이 선명한지 확인하거나 직접 입력해 주세요.")
+                if raw:
+                    st.caption(f"AI 응답 원본 ({len(raw)}건): {str(raw)[:500]}")
                 return
             st.session_state.manual_df = pd.DataFrame(rows)
             st.session_state.pop("manual_editor", None)  # 에디터 새로 그리게
