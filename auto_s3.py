@@ -14,6 +14,7 @@ import os
 import urllib.request
 import matplotlib.font_manager as fm
 from PIL import Image  # 💡 [요청1] 다중 페이지 이미지를 하나로 합치기 위한 이미지 처리 패키지
+from manual_form import manual_entry_form  # 💡 수기 실측 입력 폼
 
 # ==========================================
 # 1. 페이지 기본 설정 및 환경 세팅
@@ -1041,18 +1042,24 @@ if st.button("🔄 시스템 초기화 (새로고침)", type="primary", use_cont
             del st.session_state[key]
     st.rerun()
 
-uploaded_file = st.file_uploader("📂 견적서 엑셀 파일 업로드", type=['xlsx', 'xls'])
+mode = st.radio("📋 데이터 입력 방식", ["엑셀 업로드", "수기 실측 입력"], horizontal=True)
 
-if uploaded_file:
-    if "last_file_id" not in st.session_state or st.session_state["last_file_id"] != uploaded_file.file_id:
-        for key in list(st.session_state.keys()):
-            if key.startswith("saved_") or key.startswith("status_"):
-                del st.session_state[key]
-        st.session_state["last_file_id"] = uploaded_file.file_id
-        
-    draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = parse_any_quotation(uploaded_file)
+draw_data = None
+tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = [], [], (2500, 2500), "", ""
 
-    
+if mode == "엑셀 업로드":
+    uploaded_file = st.file_uploader("📂 견적서 엑셀 파일 업로드", type=['xlsx', 'xls'])
+    if uploaded_file:
+        if "last_file_id" not in st.session_state or st.session_state["last_file_id"] != uploaded_file.file_id:
+            for key in list(st.session_state.keys()):
+                if key.startswith("saved_") or key.startswith("status_"):
+                    del st.session_state[key]
+            st.session_state["last_file_id"] = uploaded_file.file_id
+        draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = parse_any_quotation(uploaded_file)
+else:
+    draw_data, tongba_bom, unused_tongbas, overall_scale_bounds, ext_partner, ext_address = manual_entry_form()
+
+if draw_data:
     tab1, tab2 = st.tabs(["💻 1단계: 도면 작업대", "🖨️ 2단계: 출력 및 카톡 전송 센터"])
     
     with tab1:
